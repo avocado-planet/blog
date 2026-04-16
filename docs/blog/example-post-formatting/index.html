@@ -7,11 +7,11 @@
 	<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
 	<meta name="description" content="" />
-	<title>Example Post Formatting</title>
+	<title>深層学習・誤差逆伝播法</title>
 
 	<!-- Open Graph Meta -->
-	<meta content="Long Haul" property="og:site_name" /><meta content="Example Post Formatting" property="og:title" /><meta content="article" property="og:type" /><meta content="This is a post description for meta purposes. This is also the excerpt of the article that shows up on the index/home page. Change this in the post YAML." property="og:description" /><meta content="https://long-haul.netlify.app/blog/example-post-formatting/" property="og:url" /><meta
-		content="2014-12-15T00:00:00+09:00"
+	<meta content="Long Haul" property="og:site_name" /><meta content="深層学習・誤差逆伝播法" property="og:title" /><meta content="article" property="og:type" /><meta content="誤差逆伝播法についてわかりやすく説明します。" property="og:description" /><meta content="https://long-haul.netlify.app/blog/example-post-formatting/" property="og:url" /><meta
+		content="2026-04-16T00:00:00+09:00"
 		property="article:published_time"
 	/>
 	<meta content="https://long-haul.netlify.app/about/" property="article:author" /><meta
@@ -20,7 +20,7 @@
 	/><!-- Twitter Cards -->
 	<meta name="twitter:card" content="summary" />
 	<meta name="twitter:site" content="@brianmaierjr" />
-	<meta name="twitter:creator" content="@brianmaierjr" /><meta name="twitter:title" content="Example Post Formatting" /><meta name="twitter:url" content="https://long-haul.netlify.app/blog/example-post-formatting/" /><meta name="twitter:description" content="This is a post description for meta purposes. This is also the excerpt of the article that shows up on the index/home page. Change this in the post YAML." /><meta
+	<meta name="twitter:creator" content="@brianmaierjr" /><meta name="twitter:title" content="深層学習・誤差逆伝播法" /><meta name="twitter:url" content="https://long-haul.netlify.app/blog/example-post-formatting/" /><meta name="twitter:description" content="誤差逆伝播法についてわかりやすく説明します。" /><meta
 		name="twitter:image:src"
 		content="https://long-haul.netlify.app/assets/img/touring.jpg"
 	/><!-- Favicon -->
@@ -68,98 +68,647 @@ ga('send', 'pageview');
 <div class="content">
       <div class="container">
          <article class="post"><header>
-    <h1 class="postTitle">Example Post Formatting</h1>
-    <p class="meta">December 15, 2014 | <span class="time">2</span> Minute Read</p>
+    <h1 class="postTitle">深層学習・誤差逆伝播法</h1>
+    <p class="meta">April 16, 2026 | <span class="time">7</span> Minute Read</p>
   </header>
 
-  <p class="intro"><span class="dropcap">C</span>urabitur blandit tempus porttitor. Nullam quis risus eget urna mollis ornare vel eu leo. Vestibulum id ligula porta felis euismod semper. Donec sed odio dui. Aenean lacinia bibendum nulla sed consectetur.</p>
+  <h1 id="深層学習誤差逆伝播法">深層学習・誤差逆伝播法</h1>
 
-<h1 id="heading-1">Heading 1</h1>
+<hr />
 
-<h2 id="heading-2">Heading 2</h2>
+<h2 id="1-誤差逆伝播法backpropagationとは">1. 誤差逆伝播法（Backpropagation）とは</h2>
 
-<h3 id="heading-3">Heading 3</h3>
+<p>ニューラルネットワークが「ミスから学ぶ」仕組み。</p>
 
-<h4 id="heading-4">Heading 4</h4>
-
-<h5 id="heading-5">Heading 5</h5>
-
-<h6 id="heading-6">Heading 6</h6>
-
-<blockquote>Aenean lacinia bibendum nulla sed consectetur. Morbi leo risus, porta ac consectetur ac, vestibulum at eros. Cras mattis consectetur purus sit amet fermentum. Nulla vitae elit libero, a pharetra augue. Curabitur blandit tempus porttitor. Donec sed odio dui. Cras mattis consectetur purus sit amet fermentum.</blockquote>
-
-<p>Nullam quis risus eget urna mollis ornare vel eu leo. Cras mattis consectetur purus sit amet fermentum. Duis mollis, est non commodo luctus, nisi erat porttitor ligula, eget lacinia odio sem nec elit. Vivamus sagittis lacus vel augue laoreet rutrum faucibus dolor auctor.</p>
-
-<h2 id="unordered-list">Unordered List</h2>
-<ul>
-  <li>List Item</li>
-  <li>Longer List Item
-    <ul>
-      <li>Nested List Item</li>
-      <li>Nested Item</li>
-    </ul>
-  </li>
-  <li>List Item</li>
-</ul>
-
-<h2 id="ordered-list">Ordered List</h2>
+<h3 id="直感的な例え">直感的な例え</h3>
+<p>目隠しでシュートを打つ場面を想像する：</p>
 <ol>
-  <li>List Item</li>
-  <li>Longer List Item
-    <ol>
-      <li>Nested OL Item</li>
-      <li>Another Nested Item</li>
-    </ol>
-  </li>
-  <li>List Item</li>
+  <li>シュートを打つ（<strong>前向き伝播</strong>）</li>
+  <li>友人が「左に10cmズレた」と教える（<strong>誤差計算</strong>）</li>
+  <li>そのフィードバックをもとにフォームを調整（<strong>誤差逆伝播</strong>）</li>
+  <li>入るまで繰り返す（<strong>勾配降下法</strong>）</li>
 </ol>
 
-<h2 id="definition-list">Definition List</h2>
-<dl>
-  <dt>Coffee</dt>
-  <dd>Black hot drink</dd>
-  <dt>Milk</dt>
-  <dd>White cold drink</dd>
-</dl>
+<h3 id="全体のループ">全体のループ</h3>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>入力データ → 前向き伝播 → 損失計算 → 誤差逆伝播 → 重み更新
+    ↑___________________________________________________|
+                     何千回も繰り返す
+</code></pre></div></div>
 
-<p>Donec id elit non mi porta gravida at eget metus. Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. Maecenas faucibus mollis interdum. Donec sed odio dui. Cras justo odio, dapibus ac facilisis in, egestas eget quam.</p>
+<hr />
 
-<h2 id="table">Table</h2>
+<h2 id="2-連鎖律chain-ruleの役割">2. 連鎖律（Chain Rule）の役割</h2>
+
+<h3 id="なぜ必要か">なぜ必要か</h3>
+
+<p>ニューラルネットワークは<strong>層を重ねた合成関数</strong>：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>L = f₃( f₂( f₁(x) ) )
+</code></pre></div></div>
+
+<p>「最も深い層の重み w₁ が、最終損失 L にどれだけ影響するか」を求めるために連鎖律が必要。</p>
+
+<h3 id="生活の例え">生活の例え</h3>
+
+<blockquote>
+  <p>原油価格が上がる → 輸送費が上がる → 野菜の値段が上がる</p>
+
+  <ul>
+    <li>原油1円上昇 → 輸送費2円上昇</li>
+    <li>輸送費1円上昇 → 野菜3円上昇</li>
+    <li><strong>∴ 原油1円上昇 → 野菜 2×3 = 6円上昇</strong></li>
+  </ul>
+</blockquote>
+
+<p>数式：</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>dL/dw₁ = dL/df₃ × df₃/df₂ × df₂/df₁ × df₁/dw₁
+</code></pre></div></div>
+
+<h3 id="連鎖律がもたらす2つの問題">連鎖律がもたらす2つの問題</h3>
 
 <table>
   <thead>
     <tr>
-      <th>Syntax</th>
-      <th>Description</th>
+      <th>問題</th>
+      <th>発生条件</th>
+      <th>影響</th>
+      <th>対策</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td>Header</td>
-      <td>Title</td>
+      <td><strong>勾配消失</strong></td>
+      <td>各層の勾配 &lt; 1 の連乗</td>
+      <td>深い層ほど勾配が 0 に近づき学習不能</td>
+      <td>ReLU 活性化関数</td>
     </tr>
     <tr>
-      <td>Paragraph</td>
-      <td>Text</td>
-    </tr>
-    <tr>
-      <td>Header</td>
-      <td>Title</td>
-    </tr>
-    <tr>
-      <td>Paragraph</td>
-      <td>Text</td>
+      <td><strong>勾配爆発</strong></td>
+      <td>各層の勾配 &gt; 1 の連乗</td>
+      <td>重み更新が発散、収束しない</td>
+      <td>勾配クリッピング</td>
     </tr>
   </tbody>
 </table>
 
-<p>Cras justo odio, dapibus ac facilisis in, egestas eget quam. Curabitur blandit tempus porttitor. Cum sociis natoque penatibus et magnis dis parturient montes, nascetur ridiculus mus. Donec id elit non mi porta gravida at eget metus. Aenean eu leo quam. Pellentesque ornare sem lacinia quam venenatis vestibulum. Sed posuere consectetur est at lobortis. Vivamus sagittis lacus vel augue laoreet rutrum faucibus dolor auctor.</p>
+<h3 id="計算の再利用">計算の再利用</h3>
 
-<p>Maecenas faucibus mollis interdum. Maecenas faucibus mollis interdum. Duis mollis, est non commodo luctus, nisi erat porttitor ligula, eget lacinia odio sem nec elit. Etiam porta sem malesuada magna mollis euismod. Vestibulum id ligula porta felis euismod semper. Cras mattis consectetur purus sit amet fermentum.</p>
+<p>誤差逆伝播は後ろから順に計算し、各層の勾配を<strong>一度だけ計算して前の層に渡す</strong>。
+これにより、パラメータごとに個別に差分を取る方法と比べ計算量が<strong>数百万分の1</strong>になる。</p>
 
-<p>Sed posuere consectetur est at lobortis. Fusce dapibus, tellus ac cursus commodo, tortor mauris condimentum nibh, ut fermentum massa justo sit amet risus. Fusce dapibus, tellus ac cursus commodo, tortor mauris condimentum nibh, ut fermentum massa justo sit amet risus. Aenean eu leo quam. Pellentesque ornare sem lacinia quam venenatis vestibulum.</p>
+<hr />
 
-<p>Curabitur blandit tempus porttitor. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Vivamus sagittis lacus vel augue laoreet rutrum faucibus dolor auctor. Curabitur blandit tempus porttitor. Nullam quis risus eget urna mollis ornare vel eu leo. Maecenas faucibus mollis interdum. Nullam id dolor id nibh ultricies vehicula ut id elit.</p>
+<h2 id="3-3層ネットワークの具体的な計算">3. 3層ネットワークの具体的な計算</h2>
+
+<h3 id="ネットワーク構成">ネットワーク構成</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>入力層 (2ノード) → 隠れ層 (2ノード) → 出力層 (1ノード)
+</code></pre></div></div>
+
+<ul>
+  <li>入力：x₁=1, x₂=0</li>
+  <li>目標：y=1</li>
+  <li>活性化関数：Sigmoid　σ(z) = 1/(1+e⁻ᶻ)</li>
+  <li>損失関数：MSE　L = ½(ŷ − y)²</li>
+  <li>学習率：η = 0.5</li>
+</ul>
+
+<h3 id="初期パラメータ">初期パラメータ</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>区間</th>
+      <th>重み</th>
+      <th>値</th>
+      <th>バイアス</th>
+      <th>値</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>入力→隠れ</td>
+      <td>w₁₁</td>
+      <td>0.5</td>
+      <td>b₁</td>
+      <td>0.1</td>
+    </tr>
+    <tr>
+      <td>入力→隠れ</td>
+      <td>w₁₂</td>
+      <td>0.2</td>
+      <td>b₂</td>
+      <td>0.1</td>
+    </tr>
+    <tr>
+      <td>入力→隠れ</td>
+      <td>w₂₁</td>
+      <td>0.3</td>
+      <td>—</td>
+      <td>—</td>
+    </tr>
+    <tr>
+      <td>入力→隠れ</td>
+      <td>w₂₂</td>
+      <td>0.8</td>
+      <td>—</td>
+      <td>—</td>
+    </tr>
+    <tr>
+      <td>隠れ→出力</td>
+      <td>v₁</td>
+      <td>0.6</td>
+      <td>b₃</td>
+      <td>0.1</td>
+    </tr>
+    <tr>
+      <td>隠れ→出力</td>
+      <td>v₂</td>
+      <td>0.4</td>
+      <td>—</td>
+      <td>—</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2 id="4-前向き伝播forward-propagation">4. 前向き伝播（Forward Propagation）</h2>
+
+<h3 id="ステップ1入力層--隠れ層">ステップ1：入力層 → 隠れ層</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>z₁ = w₁₁·x₁ + w₂₁·x₂ + b₁ = 0.5×1 + 0.3×0 + 0.1 = 0.6
+z₂ = w₁₂·x₁ + w₂₂·x₂ + b₂ = 0.2×1 + 0.8×0 + 0.1 = 0.3
+
+h₁ = σ(0.6) ≈ 0.6457
+h₂ = σ(0.3) ≈ 0.5744
+</code></pre></div></div>
+
+<h3 id="ステップ2隠れ層--出力層">ステップ2：隠れ層 → 出力層</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>z₃ = v₁·h₁ + v₂·h₂ + b₃
+   = 0.6×0.6457 + 0.4×0.5744 + 0.1
+   = 0.3874 + 0.2298 + 0.1
+   = 0.7172
+
+ŷ = σ(0.7172) ≈ 0.6718
+</code></pre></div></div>
+
+<h3 id="損失計算">損失計算</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>L = ½(0.6718 − 1)² ≈ 0.0539
+</code></pre></div></div>
+
+<hr />
+
+<h2 id="5-誤差逆伝播backward-propagation">5. 誤差逆伝播（Backward Propagation）</h2>
+
+<h3 id="ステップ1損失の勾配">ステップ1：損失の勾配</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>∂L/∂ŷ = ŷ − y = 0.6718 − 1 = −0.3282
+</code></pre></div></div>
+
+<h3 id="ステップ2出力層の-δ誤差信号">ステップ2：出力層の δ（誤差信号）</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>σ'(z₃) = ŷ·(1−ŷ) = 0.6718×0.3282 ≈ 0.2204
+
+δ₃ = ∂L/∂ŷ × σ'(z₃) = −0.3282 × 0.2204 ≈ −0.0723
+</code></pre></div></div>
+
+<p>出力層の重み勾配：</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>∂L/∂v₁ = δ₃ × h₁ = −0.0723 × 0.6457 ≈ −0.0467
+∂L/∂v₂ = δ₃ × h₂ = −0.0723 × 0.5744 ≈ −0.0415
+∂L/∂b₃ = δ₃                           ≈ −0.0723
+</code></pre></div></div>
+
+<h3 id="ステップ3隠れ層の-δ連鎖律の核心">ステップ3：隠れ層の δ（連鎖律の核心）</h3>
+
+<p>誤差を重みで伝播：</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>∂L/∂h₁ = δ₃ × v₁ = −0.0723 × 0.6 ≈ −0.0434
+∂L/∂h₂ = δ₃ × v₂ = −0.0723 × 0.4 ≈ −0.0289
+</code></pre></div></div>
+
+<p>Sigmoid の導関数：</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>σ'(z₁) = h₁·(1−h₁) = 0.6457×0.3543 ≈ 0.2287
+σ'(z₂) = h₂·(1−h₂) = 0.5744×0.4256 ≈ 0.2444
+</code></pre></div></div>
+
+<p>隠れ層の delta：</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>δ₁ = ∂L/∂h₁ × σ'(z₁) = −0.0434 × 0.2287 ≈ −0.0099
+δ₂ = ∂L/∂h₂ × σ'(z₂) = −0.0289 × 0.2444 ≈ −0.0071
+</code></pre></div></div>
+
+<p>隠れ層の重み勾配：</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>∂L/∂w₁₁ = δ₁ × x₁ = −0.0099 × 1 ≈ −0.0099
+∂L/∂w₁₂ = δ₂ × x₁ = −0.0071 × 1 ≈ −0.0071
+∂L/∂w₂₁ = δ₁ × x₂ = −0.0099 × 0 =  0      ← x₂=0 のため更新なし
+∂L/∂w₂₂ = δ₂ × x₂ = −0.0071 × 0 =  0      ← x₂=0 のため更新なし
+</code></pre></div></div>
+
+<hr />
+
+<h2 id="6-重みの更新">6. 重みの更新</h2>
+
+<p><strong>更新式：新しい重み = 古い重み − η × 勾配</strong></p>
+
+<table>
+  <thead>
+    <tr>
+      <th>パラメータ</th>
+      <th>旧値</th>
+      <th>勾配</th>
+      <th>新値</th>
+      <th>変化</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>v₁</td>
+      <td>0.6000</td>
+      <td>−0.0467</td>
+      <td><strong>0.6234</strong></td>
+      <td>↑</td>
+    </tr>
+    <tr>
+      <td>v₂</td>
+      <td>0.4000</td>
+      <td>−0.0415</td>
+      <td><strong>0.4208</strong></td>
+      <td>↑</td>
+    </tr>
+    <tr>
+      <td>b₃</td>
+      <td>0.1000</td>
+      <td>−0.0723</td>
+      <td><strong>0.1362</strong></td>
+      <td>↑</td>
+    </tr>
+    <tr>
+      <td>w₁₁</td>
+      <td>0.5000</td>
+      <td>−0.0099</td>
+      <td><strong>0.5050</strong></td>
+      <td>↑</td>
+    </tr>
+    <tr>
+      <td>w₁₂</td>
+      <td>0.2000</td>
+      <td>−0.0071</td>
+      <td><strong>0.2036</strong></td>
+      <td>↑</td>
+    </tr>
+    <tr>
+      <td>w₂₁</td>
+      <td>0.3000</td>
+      <td>0</td>
+      <td><strong>0.3000</strong></td>
+      <td>—</td>
+    </tr>
+    <tr>
+      <td>w₂₂</td>
+      <td>0.8000</td>
+      <td>0</td>
+      <td><strong>0.8000</strong></td>
+      <td>—</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="重要な観察">重要な観察</h3>
+
+<ul>
+  <li>全勾配が<strong>負</strong> → 重みを増やすことで損失が減少する方向</li>
+  <li>w₂₁, w₂₂ は x₂=0 のため更新されない（「貢献しない入力」は学習しない）</li>
+  <li>隠れ層の勾配は出力層より小さい → Sigmoid による<strong>勾配消失の萌芽</strong></li>
+  <li>この1イテレーション後、ŷ は 0.6718 から目標値 1.0 に少し近づく</li>
+</ul>
+
+<hr />
+
+<h2 id="7-勾配の流れ全体像">7. 勾配の流れ（全体像）</h2>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>L = 0.0539
+    │
+    │ ∂L/∂ŷ = −0.3282
+    ▼
+[出力層]  δ₃ = −0.0723  ──→  v₁, v₂, b₃ を更新
+    │
+    │ × v₁, v₂ で伝播
+    ▼
+[隠れ層]  δ₁=−0.0099, δ₂=−0.0071  ──→  w₁₁, w₁₂ を更新
+    │
+    │ × x₁=1, x₂=0
+    ▼
+[入力層]  x₂=0 → w₂₁, w₂₂ は更新されない
+</code></pre></div></div>
+
+<hr />
+
+<h2 id="8-よくある疑問-qa">8. よくある疑問 Q&amp;A</h2>
+
+<h3 id="q1lŷ--ŷ--y-はなぜそうなるか">Q1：∂L/∂ŷ = ŷ − y はなぜそうなるか</h3>
+
+<p>損失関数 L = ½(ŷ − y)² を ŷ で微分する：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>∂L/∂ŷ = ½ × 2(ŷ − y) × 1 = ŷ − y
+</code></pre></div></div>
+
+<p>½ をかけていた理由はまさにここで <strong>2 と打ち消すため</strong>。</p>
+
+<p>数直線で見ると：</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>         ŷ=0.6718      y=1
+──────────────┬─────────┬──────→
+              └────┬────┘
+               差 = −0.3282
+               （ŷ は y より小さい）
+</code></pre></div></div>
+
+<p>勾配の符号と意味：</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>状況</th>
+      <th>ŷ</th>
+      <th>y</th>
+      <th>勾配</th>
+      <th>意味</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>予測が小さすぎ</td>
+      <td>0.67</td>
+      <td>1.0</td>
+      <td><strong>−0.33</strong>（負）</td>
+      <td>ŷ を増やせ</td>
+    </tr>
+    <tr>
+      <td>予測がピッタリ</td>
+      <td>1.00</td>
+      <td>1.0</td>
+      <td><strong>0</strong>（ゼロ）</td>
+      <td>変更不要</td>
+    </tr>
+    <tr>
+      <td>予測が大きすぎ</td>
+      <td>1.30</td>
+      <td>1.0</td>
+      <td><strong>+0.30</strong>（正）</td>
+      <td>ŷ を減らせ</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>勾配の<strong>符号</strong>が修正方向、<strong>大きさ</strong>が修正量を教える。</p>
+
+<hr />
+
+<h3 id="q2δ--lŷ--σz-はなぜ2つを掛けるか">Q2：δ₃ = ∂L/∂ŷ × σ’(z₃) はなぜ2つを掛けるか</h3>
+
+<p>重み v₁ の更新には ∂L/∂v₁ が必要だが、v₁ は直接 L に触れていない：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>v₁ → z₃ → ŷ → L
+</code></pre></div></div>
+
+<p>連鎖律で展開すると：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>∂L/∂v₁ = ∂L/∂ŷ × ∂ŷ/∂z₃ × ∂z₃/∂v₁
+           ↑          ↑          ↑
+        −0.3282     0.2204      h₁
+        (ズレ)   (Sigmoidの傾き) (v₁の貢献)
+</code></pre></div></div>
+
+<p>最初の2つをまとめたものが δ₃：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>δ₃ = ∂L/∂ŷ × σ'(z₃)
+   = −0.3282 × 0.2204
+   = −0.0723
+</code></pre></div></div>
+
+<table>
+  <thead>
+    <tr>
+      <th>要素</th>
+      <th>値</th>
+      <th>役割</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>∂L/∂ŷ = −0.3282</td>
+      <td>予測のズレ</td>
+      <td>どちらに・どれだけ間違えたか</td>
+    </tr>
+    <tr>
+      <td>σ’(z₃) = 0.2204</td>
+      <td>Sigmoid の傾き</td>
+      <td>z₃ の変化が ŷ にどう伝わるか</td>
+    </tr>
+    <tr>
+      <td>δ₃ = −0.0723</td>
+      <td>合成した誤差信号</td>
+      <td>z₃ を増やせば損失が減る</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>絶対値が 0.3282 → 0.0723 に小さくなったのは Sigmoid（0.2204）が信号を<strong>圧縮</strong>したから。</p>
+
+<p>δ₃ があれば各重みの勾配を1行で書ける：</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>∂L/∂v₁ = δ₃ × h₁ = −0.0723 × 0.6457 = −0.0467
+∂L/∂v₂ = δ₃ × h₂ = −0.0723 × 0.5744 = −0.0415
+∂L/∂b₃ = δ₃ × 1  = −0.0723
+</code></pre></div></div>
+
+<hr />
+
+<h3 id="q3zv--h-になるのはなぜか">Q3：∂z₃/∂v₁ = h₁ になるのはなぜか</h3>
+
+<p>z₃ の定義：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>z₃ = v₁·h₁ + v₂·h₂ + b₃
+</code></pre></div></div>
+
+<p>これを v₁ で偏微分すると、v₁ を含まない項（v₂·h₂ と b₃）は消える：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>∂z₃/∂v₁ = h₁
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">y = 3x</code> を x で微分すると <code class="language-plaintext highlighter-rouge">3</code> になるのと同じ構造。</p>
+
+<p><strong>h₁ は「v₁ がどれだけ z₃ に貢献したか」の係数</strong>。前の層の出力がそのまま勾配のスケールになる。</p>
+
+<p>∂L/∂v₁ の完全な展開：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>∂L/∂v₁ = ∂L/∂ŷ  ×  ∂ŷ/∂z₃  ×  ∂z₃/∂v₁
+        = −0.3282 ×  0.2204  ×  0.6457
+        =   δ₃               ×  h₁
+        = −0.0723             ×  0.6457
+        = −0.0467
+</code></pre></div></div>
+
+<hr />
+
+<h3 id="q4隠れ層の逆伝播lh--δ--lwを詳しく">Q4：隠れ層の逆伝播（∂L/∂h₁ → δ₁ → ∂L/∂w₁₁）を詳しく</h3>
+
+<h4 id="全体の経路">全体の経路</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>w₁₁ → z₁ → h₁ → z₃ → ŷ → L
+</code></pre></div></div>
+
+<p>連鎖律で展開：</p>
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>∂L/∂w₁₁ = ∂L/∂h₁ × ∂h₁/∂z₁ × ∂z₁/∂w₁₁
+</code></pre></div></div>
+
+<p>これを3段階で計算する。</p>
+
+<hr />
+
+<h4 id="段階誤差を重みで伝播-lh">段階①：誤差を重みで伝播 ∂L/∂h₁</h4>
+
+<p>z₃ = v₁·h₁ + v₂·h₂ + b₃ を h₁ で偏微分すると <code class="language-plaintext highlighter-rouge">∂z₃/∂h₁ = v₁</code>。</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>∂L/∂h₁ = ∂L/∂z₃ × ∂z₃/∂h₁
+        =  δ₃    ×   v₁
+        = −0.0723 × 0.6
+        = −0.0434
+</code></pre></div></div>
+
+<p>ポイント：<strong>前向きでは <code class="language-plaintext highlighter-rouge">h₁ × v₁ → z₃</code>、逆向きでは <code class="language-plaintext highlighter-rouge">δ₃ × v₁ → h₁の誤差</code></strong>。重みが逆方向にも使われる。</p>
+
+<hr />
+
+<h4 id="段階sigmoid-の導関数-σz">段階②：Sigmoid の導関数 σ’(z₁)</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>∂h₁/∂z₁ = σ'(z₁) = h₁·(1−h₁)
+          = 0.6457 × 0.3543
+          ≈ 0.2287
+</code></pre></div></div>
+
+<p>前向き伝播で計算済みの h₁ をそのまま使い回せる。</p>
+
+<p>Sigmoid の傾きの性質：</p>
+<ul>
+  <li>出力が 0.5 付近 → 傾き最大（≈0.25）</li>
+  <li>出力が 0 や 1 付近 → 傾きほぼ 0 ← <strong>勾配消失の原因</strong></li>
+</ul>
+
+<hr />
+
+<h4 id="段階隠れ層の-delta-δ">段階③：隠れ層の delta δ₁</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>δ₁ = ∂L/∂h₁ × σ'(z₁)
+   = −0.0434 × 0.2287
+   ≈ −0.0099
+</code></pre></div></div>
+
+<p>出力層との比較：</p>
+
+<table>
+  <thead>
+    <tr>
+      <th> </th>
+      <th>出力層</th>
+      <th>隠れ層</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>式</td>
+      <td>δ₃ = ∂L/∂ŷ × σ’(z₃)</td>
+      <td>δ₁ = ∂L/∂h₁ × σ’(z₁)</td>
+    </tr>
+    <tr>
+      <td>前の誤差</td>
+      <td>−0.3282</td>
+      <td>−0.0434</td>
+    </tr>
+    <tr>
+      <td>Sigmoid傾き</td>
+      <td>0.2204</td>
+      <td>0.2287</td>
+    </tr>
+    <tr>
+      <td>delta</td>
+      <td>−0.0723</td>
+      <td>−0.0099</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>層を越えるたびに誤差信号が<strong>小さくなっている</strong>。</p>
+
+<hr />
+
+<h4 id="段階重み勾配-lw">段階④：重み勾配 ∂L/∂w₁₁</h4>
+
+<p>z₁ = w₁₁·x₁ + w₂₁·x₂ + b₁ を w₁₁ で偏微分すると <code class="language-plaintext highlighter-rouge">∂z₁/∂w₁₁ = x₁</code>。</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>∂L/∂w₁₁ = δ₁ × x₁ = −0.0099 × 1 = −0.0099
+</code></pre></div></div>
+
+<hr />
+
+<h4 id="w-w-がゼロになる理由">w₂₁, w₂₂ がゼロになる理由</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>∂L/∂w₂₁ = δ₁ × x₂ = −0.0099 × 0 = 0
+∂L/∂w₂₂ = δ₂ × x₂ = −0.0071 × 0 = 0
+</code></pre></div></div>
+
+<p>z₁ を w₂₁ で偏微分すると <code class="language-plaintext highlighter-rouge">∂z₁/∂w₂₁ = x₂ = 0</code>。
+x₂=0 なので w₂₁ の z₁ への貢献がゼロ → 責任もゼロ → 勾配もゼロ → 更新されない。</p>
+
+<hr />
+
+<h4 id="連鎖律の全体展開">連鎖律の全体展開</h4>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>∂L/∂w₁₁ = ∂L/∂ŷ  ×  ∂ŷ/∂z₃  ×  ∂z₃/∂h₁  ×  ∂h₁/∂z₁  ×  ∂z₁/∂w₁₁
+         = −0.3282 ×  0.2204  ×   0.6     ×   0.2287  ×    1
+         =    δ₃            ×   v₁      ×  σ'(z₁)  ×   x₁
+         = −0.0099
+</code></pre></div></div>
+
+<p>5つの項が連鎖してひとつの勾配になっている。</p>
+
+<hr />
+
+<h2 id="9-キーポイント-まとめ">9. キーポイント まとめ</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>テーマ</th>
+      <th>ポイント</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>誤差逆伝播の本質</td>
+      <td>最終誤差を各パラメータに「逆向きに責任分配」する</td>
+    </tr>
+    <tr>
+      <td>連鎖律の役割</td>
+      <td>合成関数の微分を「各層の影響の積」に分解する</td>
+    </tr>
+    <tr>
+      <td>勾配消失</td>
+      <td>Sigmoid の連乗で深層の勾配が消える → ReLU で対策</td>
+    </tr>
+    <tr>
+      <td>勾配爆発</td>
+      <td>勾配が連乗で発散する → 勾配クリッピングで対策</td>
+    </tr>
+    <tr>
+      <td>ゼロ入力問題</td>
+      <td>x=0 の入力につながる重みは更新されない</td>
+    </tr>
+    <tr>
+      <td>計算効率</td>
+      <td>後ろから順に計算し勾配を再利用 → 計算量を劇的に削減</td>
+    </tr>
+  </tbody>
+</table>
 
 
   <!-- POST NAVIGATION -->
