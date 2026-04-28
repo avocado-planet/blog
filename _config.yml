@@ -1,9 +1,9 @@
 title: Long Haul
 description: Long Form Jekyll theme built with SASS
 
-url: https://long-haul.netlify.app
+url: https://avocado-planet.github.io
 # Only necessary when hosting your site in a sub-directory. Project sites hosted on GitHub Pages are the common use-case of this variable.
-baseurl: # Ex: /project-page
+baseurl: /blog
 paginate_path: "blog/page:num/"
 permalink: blog/:title/
 
