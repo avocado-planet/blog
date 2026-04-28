@@ -3,17 +3,663 @@
   <channel>
     <title>Long Haul</title>
     <description>Long Form Jekyll theme built with SASS</description>
-    <link>https://long-haul.netlify.app/</link>
-    <atom:link href="https://long-haul.netlify.app/feed.xml" rel="self" type="application/rss+xml"/>
-    <pubDate>Thu, 16 Apr 2026 22:31:42 +0900</pubDate>
-    <lastBuildDate>Thu, 16 Apr 2026 22:31:42 +0900</lastBuildDate>
-    <generator>Jekyll v4.4.1</generator><item>
-        <title>深層学習・誤差逆伝播法</title>
-        <description>&lt;h1 id=&quot;深層学習誤差逆伝播法&quot;&gt;深層学習・誤差逆伝播法&lt;/h1&gt;
+    <link>https://avocado-planet.github.io/</link>
+    <atom:link href="https://avocado-planet.github.io/feed.xml" rel="self" type="application/rss+xml"/>
+    <pubDate>Tue, 28 Apr 2026 22:46:47 +0000</pubDate>
+    <lastBuildDate>Tue, 28 Apr 2026 22:46:47 +0000</lastBuildDate>
+    <generator>Jekyll v3.10.0</generator><item>
+        <title>MCPの仕組みを理解する：SSE・Stdio通信からLLMとのデータフローまで</title>
+        <description>&lt;h2 id=&quot;mcpとは&quot;&gt;MCPとは&lt;/h2&gt;
+
+&lt;p&gt;MCP（Model Context Protocol）は、LLMエージェントが外部ツール（関数・APIなど）を呼び出すための通信プロトコルです。LangChainやClaude Desktopなどのクライアントが、MCPサーバーに接続してツールを取得・実行します。&lt;/p&gt;
 
 &lt;hr /&gt;
 
-&lt;h2 id=&quot;1-誤差逆伝播法backpropagationとは&quot;&gt;1. 誤差逆伝播法（Backpropagation）とは&lt;/h2&gt;
+&lt;h2 id=&quot;通信方式sseとstdio&quot;&gt;通信方式：SSEとStdio&lt;/h2&gt;
+
+&lt;p&gt;MCPには主に2つのトランスポートモードがあります。&lt;/p&gt;
+
+&lt;h3 id=&quot;sseserver-sent-events&quot;&gt;SSE（Server-Sent Events）&lt;/h3&gt;
+
+&lt;p&gt;HTTPベースの通信方式。クライアントが1回だけ接続すると、サーバーが好きなタイミングで何度もデータを送り続けられます。&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;c1&quot;&gt;# SSEモードで起動
+&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;mcp&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;run&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;transport&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;sse&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+
+&lt;span class=&quot;c1&quot;&gt;# または uvicorn で細かく制御
+&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;uvicorn&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;run&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;mcp&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;sse_app&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(),&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;host&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;0.0.0.0&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;port&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;8001&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;項目&lt;/th&gt;
+      &lt;th&gt;内容&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;通信手段&lt;/td&gt;
+      &lt;td&gt;HTTP（&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;text/event-stream&lt;/code&gt;）&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;接続&lt;/td&gt;
+      &lt;td&gt;1回のリクエストで維持&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;用途&lt;/td&gt;
+      &lt;td&gt;ネットワーク越しの接続、Colab環境&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;mcp.run()&lt;/code&gt; はMCPが内部でuvicornを起動するシンプルな方法。&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;uvicorn.run(mcp.sse_app())&lt;/code&gt; はホスト・ポートを自由に指定でき、既存のFastAPIアプリへの組み込みも可能です。&lt;/p&gt;
+
+&lt;p&gt;Google Colabでは &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;stdio&lt;/code&gt; モードが &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;sys.stdin.fileno()&lt;/code&gt; エラーを起こすため、SSEモードが回避策として使われます。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h3 id=&quot;stdio標準入出力&quot;&gt;Stdio（標準入出力）&lt;/h3&gt;
+
+&lt;p&gt;OSのパイプ機能でプロセスを直結する方式。HTTPを一切使いません。&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;n&quot;&gt;math_proc&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;subprocess&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Popen&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;python&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;/tmp/math_server.py&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;],&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;stdout&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;subprocess&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;PIPE&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;stderr&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;subprocess&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;PIPE&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;subprocess.Popen&lt;/code&gt; は起動したら即座に次の行へ進む（非同期）ため、サーバーを別プロセスで動かしながらクライアントコードを続けられます。&lt;/p&gt;
+
+&lt;p&gt;&lt;strong&gt;プロセス構造：OSのパイプで2プロセスを直結&lt;/strong&gt;&lt;/p&gt;
+
+&lt;svg width=&quot;100%&quot; viewBox=&quot;0 0 680 220&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot;&gt;
+  &lt;defs&gt;&lt;marker id=&quot;arr1&quot; viewBox=&quot;0 0 10 10&quot; refX=&quot;8&quot; refY=&quot;5&quot; markerWidth=&quot;6&quot; markerHeight=&quot;6&quot; orient=&quot;auto-start-reverse&quot;&gt;&lt;path d=&quot;M2 1L8 5L2 9&quot; fill=&quot;none&quot; stroke=&quot;context-stroke&quot; stroke-width=&quot;1.5&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot; /&gt;&lt;/marker&gt;&lt;/defs&gt;
+  &lt;rect x=&quot;30&quot; y=&quot;20&quot; width=&quot;620&quot; height=&quot;180&quot; rx=&quot;16&quot; fill=&quot;#f1efe8&quot; stroke=&quot;#888780&quot; stroke-width=&quot;0.5&quot; /&gt;
+  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;13&quot; font-weight=&quot;500&quot; x=&quot;340&quot; y=&quot;46&quot; text-anchor=&quot;middle&quot; fill=&quot;#444441&quot;&gt;OS（同一マシン）&lt;/text&gt;
+  &lt;rect x=&quot;60&quot; y=&quot;66&quot; width=&quot;190&quot; height=&quot;70&quot; rx=&quot;8&quot; fill=&quot;#eeedfe&quot; stroke=&quot;#534ab7&quot; stroke-width=&quot;0.5&quot; /&gt;
+  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;13&quot; font-weight=&quot;500&quot; x=&quot;155&quot; y=&quot;97&quot; text-anchor=&quot;middle&quot; fill=&quot;#3c3489&quot;&gt;クライアント&lt;/text&gt;
+  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;11&quot; x=&quot;155&quot; y=&quot;116&quot; text-anchor=&quot;middle&quot; fill=&quot;#534ab7&quot;&gt;LangChain / Claude&lt;/text&gt;
+  &lt;rect x=&quot;430&quot; y=&quot;66&quot; width=&quot;190&quot; height=&quot;70&quot; rx=&quot;8&quot; fill=&quot;#e1f5ee&quot; stroke=&quot;#0f6e56&quot; stroke-width=&quot;0.5&quot; /&gt;
+  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;13&quot; font-weight=&quot;500&quot; x=&quot;525&quot; y=&quot;97&quot; text-anchor=&quot;middle&quot; fill=&quot;#085041&quot;&gt;サーバー&lt;/text&gt;
+  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;11&quot; x=&quot;525&quot; y=&quot;116&quot; text-anchor=&quot;middle&quot; fill=&quot;#0f6e56&quot;&gt;math_server.py&lt;/text&gt;
+  &lt;line x1=&quot;252&quot; y1=&quot;92&quot; x2=&quot;428&quot; y2=&quot;92&quot; stroke=&quot;#1D9E75&quot; stroke-width=&quot;1.5&quot; marker-end=&quot;url(#arr1)&quot; /&gt;
+  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;11&quot; x=&quot;340&quot; y=&quot;85&quot; text-anchor=&quot;middle&quot; fill=&quot;#085041&quot;&gt;stdin（書き込み）&lt;/text&gt;
+  &lt;line x1=&quot;428&quot; y1=&quot;112&quot; x2=&quot;252&quot; y2=&quot;112&quot; stroke=&quot;#534ab7&quot; stroke-width=&quot;1.5&quot; marker-end=&quot;url(#arr1)&quot; /&gt;
+  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;11&quot; x=&quot;340&quot; y=&quot;130&quot; text-anchor=&quot;middle&quot; fill=&quot;#3c3489&quot;&gt;stdout（読み取り）&lt;/text&gt;
+  &lt;rect x=&quot;60&quot; y=&quot;155&quot; width=&quot;560&quot; height=&quot;32&quot; rx=&quot;6&quot; fill=&quot;#ffffff&quot; stroke=&quot;#b4b2a9&quot; stroke-width=&quot;0.5&quot; /&gt;
+  &lt;text font-family=&quot;monospace&quot; font-size=&quot;11&quot; x=&quot;340&quot; y=&quot;175&quot; text-anchor=&quot;middle&quot; fill=&quot;#444441&quot;&gt;subprocess.Popen([&quot;python&quot;, &quot;math_server.py&quot;], stdout=PIPE, stderr=PIPE)&lt;/text&gt;
+&lt;/svg&gt;
+
+&lt;p&gt;プロトコルは &lt;strong&gt;JSON-RPC 2.0&lt;/strong&gt;。1行1メッセージ（改行区切り）でパイプを流れます。&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;クライアント → サーバーのstdinに書き込む
+サーバー     → stdoutに書き込む → クライアントが読む
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;&lt;strong&gt;JSON-RPC通信の流れ（クライアント ↔ サーバー）&lt;/strong&gt;&lt;/p&gt;
+
+&lt;svg width=&quot;100%&quot; viewBox=&quot;0 0 680 400&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot;&gt;
+  &lt;defs&gt;&lt;marker id=&quot;arr2&quot; viewBox=&quot;0 0 10 10&quot; refX=&quot;8&quot; refY=&quot;5&quot; markerWidth=&quot;6&quot; markerHeight=&quot;6&quot; orient=&quot;auto-start-reverse&quot;&gt;&lt;path d=&quot;M2 1L8 5L2 9&quot; fill=&quot;none&quot; stroke=&quot;context-stroke&quot; stroke-width=&quot;1.5&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot; /&gt;&lt;/marker&gt;&lt;/defs&gt;
+  &lt;rect x=&quot;30&quot; y=&quot;20&quot; width=&quot;130&quot; height=&quot;44&quot; rx=&quot;8&quot; fill=&quot;#eeedfe&quot; stroke=&quot;#534ab7&quot; stroke-width=&quot;0.5&quot; /&gt;
+  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;13&quot; font-weight=&quot;500&quot; x=&quot;95&quot; y=&quot;42&quot; text-anchor=&quot;middle&quot; fill=&quot;#3c3489&quot;&gt;クライアント&lt;/text&gt;
+  &lt;rect x=&quot;520&quot; y=&quot;20&quot; width=&quot;130&quot; height=&quot;44&quot; rx=&quot;8&quot; fill=&quot;#e1f5ee&quot; stroke=&quot;#0f6e56&quot; stroke-width=&quot;0.5&quot; /&gt;
+  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;13&quot; font-weight=&quot;500&quot; x=&quot;585&quot; y=&quot;42&quot; text-anchor=&quot;middle&quot; fill=&quot;#085041&quot;&gt;サーバー&lt;/text&gt;
+  &lt;line x1=&quot;95&quot; y1=&quot;64&quot; x2=&quot;95&quot; y2=&quot;380&quot; stroke=&quot;#b4b2a9&quot; stroke-width=&quot;1.5&quot; /&gt;
+  &lt;line x1=&quot;585&quot; y1=&quot;64&quot; x2=&quot;585&quot; y2=&quot;380&quot; stroke=&quot;#b4b2a9&quot; stroke-width=&quot;1.5&quot; /&gt;
+  &lt;line x1=&quot;97&quot; y1=&quot;100&quot; x2=&quot;583&quot; y2=&quot;100&quot; stroke=&quot;#1D9E75&quot; stroke-width=&quot;1.5&quot; marker-end=&quot;url(#arr2)&quot; /&gt;
+  &lt;rect x=&quot;170&quot; y=&quot;80&quot; width=&quot;316&quot; height=&quot;30&quot; rx=&quot;6&quot; fill=&quot;#eaf3de&quot; stroke=&quot;#3b6d11&quot; stroke-width=&quot;0.5&quot; /&gt;
+  &lt;text font-family=&quot;monospace&quot; font-size=&quot;11&quot; x=&quot;328&quot; y=&quot;99&quot; text-anchor=&quot;middle&quot; fill=&quot;#27500a&quot;&gt;{&quot;method&quot;:&quot;initialize&quot;,&quot;id&quot;:1}&lt;/text&gt;
+  &lt;line x1=&quot;583&quot; y1=&quot;148&quot; x2=&quot;97&quot; y2=&quot;148&quot; stroke=&quot;#534ab7&quot; stroke-width=&quot;1.5&quot; marker-end=&quot;url(#arr2)&quot; /&gt;
+  &lt;rect x=&quot;170&quot; y=&quot;128&quot; width=&quot;316&quot; height=&quot;30&quot; rx=&quot;6&quot; fill=&quot;#eeedfe&quot; stroke=&quot;#534ab7&quot; stroke-width=&quot;0.5&quot; /&gt;
+  &lt;text font-family=&quot;monospace&quot; font-size=&quot;11&quot; x=&quot;328&quot; y=&quot;147&quot; text-anchor=&quot;middle&quot; fill=&quot;#3c3489&quot;&gt;{&quot;result&quot;:{&quot;capabilities&quot;:{...}},&quot;id&quot;:1}&lt;/text&gt;
+  &lt;line x1=&quot;97&quot; y1=&quot;196&quot; x2=&quot;583&quot; y2=&quot;196&quot; stroke=&quot;#1D9E75&quot; stroke-width=&quot;1.5&quot; marker-end=&quot;url(#arr2)&quot; /&gt;
+  &lt;rect x=&quot;196&quot; y=&quot;176&quot; width=&quot;264&quot; height=&quot;30&quot; rx=&quot;6&quot; fill=&quot;#eaf3de&quot; stroke=&quot;#3b6d11&quot; stroke-width=&quot;0.5&quot; /&gt;
+  &lt;text font-family=&quot;monospace&quot; font-size=&quot;11&quot; x=&quot;328&quot; y=&quot;195&quot; text-anchor=&quot;middle&quot; fill=&quot;#27500a&quot;&gt;{&quot;method&quot;:&quot;tools/list&quot;,&quot;id&quot;:2}&lt;/text&gt;
+  &lt;line x1=&quot;583&quot; y1=&quot;244&quot; x2=&quot;97&quot; y2=&quot;244&quot; stroke=&quot;#534ab7&quot; stroke-width=&quot;1.5&quot; marker-end=&quot;url(#arr2)&quot; /&gt;
+  &lt;rect x=&quot;148&quot; y=&quot;224&quot; width=&quot;364&quot; height=&quot;30&quot; rx=&quot;6&quot; fill=&quot;#eeedfe&quot; stroke=&quot;#534ab7&quot; stroke-width=&quot;0.5&quot; /&gt;
+  &lt;text font-family=&quot;monospace&quot; font-size=&quot;11&quot; x=&quot;328&quot; y=&quot;243&quot; text-anchor=&quot;middle&quot; fill=&quot;#3c3489&quot;&gt;{&quot;result&quot;:{&quot;tools&quot;:[{&quot;name&quot;:&quot;add&quot;,...}]},&quot;id&quot;:2}&lt;/text&gt;
+  &lt;line x1=&quot;97&quot; y1=&quot;292&quot; x2=&quot;583&quot; y2=&quot;292&quot; stroke=&quot;#1D9E75&quot; stroke-width=&quot;1.5&quot; marker-end=&quot;url(#arr2)&quot; /&gt;
+  &lt;rect x=&quot;100&quot; y=&quot;272&quot; width=&quot;460&quot; height=&quot;30&quot; rx=&quot;6&quot; fill=&quot;#eaf3de&quot; stroke=&quot;#3b6d11&quot; stroke-width=&quot;0.5&quot; /&gt;
+  &lt;text font-family=&quot;monospace&quot; font-size=&quot;11&quot; x=&quot;328&quot; y=&quot;291&quot; text-anchor=&quot;middle&quot; fill=&quot;#27500a&quot;&gt;{&quot;method&quot;:&quot;tools/call&quot;,&quot;params&quot;:{&quot;name&quot;:&quot;add&quot;,&quot;arguments&quot;:{&quot;a&quot;:3,&quot;b&quot;:5}},&quot;id&quot;:3}&lt;/text&gt;
+  &lt;line x1=&quot;583&quot; y1=&quot;340&quot; x2=&quot;97&quot; y2=&quot;340&quot; stroke=&quot;#534ab7&quot; stroke-width=&quot;1.5&quot; marker-end=&quot;url(#arr2)&quot; /&gt;
+  &lt;rect x=&quot;170&quot; y=&quot;320&quot; width=&quot;316&quot; height=&quot;30&quot; rx=&quot;6&quot; fill=&quot;#eeedfe&quot; stroke=&quot;#534ab7&quot; stroke-width=&quot;0.5&quot; /&gt;
+  &lt;text font-family=&quot;monospace&quot; font-size=&quot;11&quot; x=&quot;328&quot; y=&quot;339&quot; text-anchor=&quot;middle&quot; fill=&quot;#3c3489&quot;&gt;{&quot;result&quot;:{&quot;content&quot;:[{&quot;text&quot;:&quot;8&quot;}]},&quot;id&quot;:3}&lt;/text&gt;
+  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;11&quot; x=&quot;30&quot; y=&quot;104&quot; fill=&quot;#639922&quot;&gt;①&lt;/text&gt;
+  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;11&quot; x=&quot;30&quot; y=&quot;152&quot; fill=&quot;#534ab7&quot;&gt;②&lt;/text&gt;
+  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;11&quot; x=&quot;30&quot; y=&quot;200&quot; fill=&quot;#639922&quot;&gt;③&lt;/text&gt;
+  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;11&quot; x=&quot;30&quot; y=&quot;248&quot; fill=&quot;#534ab7&quot;&gt;④&lt;/text&gt;
+  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;11&quot; x=&quot;30&quot; y=&quot;296&quot; fill=&quot;#639922&quot;&gt;⑤&lt;/text&gt;
+  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;11&quot; x=&quot;30&quot; y=&quot;344&quot; fill=&quot;#534ab7&quot;&gt;⑥&lt;/text&gt;
+&lt;/svg&gt;
+
+&lt;p&gt;通信の流れ：&lt;/p&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;#&lt;/th&gt;
+      &lt;th&gt;方向&lt;/th&gt;
+      &lt;th&gt;内容&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;①&lt;/td&gt;
+      &lt;td&gt;→&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;initialize&lt;/code&gt;：接続確立の握手&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;②&lt;/td&gt;
+      &lt;td&gt;←&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;capabilities&lt;/code&gt;：サーバーの機能を返す&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;③&lt;/td&gt;
+      &lt;td&gt;→&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tools/list&lt;/code&gt;：ツール一覧を要求&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;④&lt;/td&gt;
+      &lt;td&gt;←&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tools&lt;/code&gt;：&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;add&lt;/code&gt;, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;multiply&lt;/code&gt; などのリスト&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;⑤&lt;/td&gt;
+      &lt;td&gt;→&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tools/call&lt;/code&gt;：ツールを引数付きで実行&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;⑥&lt;/td&gt;
+      &lt;td&gt;←&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;content&lt;/code&gt;：実行結果を返す&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt; &lt;/th&gt;
+      &lt;th&gt;Stdio&lt;/th&gt;
+      &lt;th&gt;SSE&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;通信手段&lt;/td&gt;
+      &lt;td&gt;OSパイプ&lt;/td&gt;
+      &lt;td&gt;HTTP&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;動作場所&lt;/td&gt;
+      &lt;td&gt;同一マシン限定&lt;/td&gt;
+      &lt;td&gt;ネットワーク越しも可&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;速度&lt;/td&gt;
+      &lt;td&gt;速い&lt;/td&gt;
+      &lt;td&gt;やや遅い&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;llmとmcp間のデータフロー&quot;&gt;LLMとMCP間のデータフロー&lt;/h2&gt;
+
+&lt;h3 id=&quot;ツール定義の取得&quot;&gt;ツール定義の取得&lt;/h3&gt;
+
+&lt;p&gt;MCPクライアントが接続先サーバーに「どんなツールが使えるか？」を問い合わせるのが &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;get_tools()&lt;/code&gt; です。サーバーはツールの名前・説明・引数の型をJSON形式で返します。これをLLMに渡すことで、LLMは「どのツールをどう使えるか」を把握できるようになります。&lt;/p&gt;
+
+&lt;p&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;get_tools()&lt;/code&gt; はユーザーの入力を待たず、エージェント作成時に1回だけ実行されます。チャットが始まる前の「準備フェーズ」です。&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;c1&quot;&gt;# 1. MCPサーバーへの接続設定
+&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;client&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;MultiServerMCPClient&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;({&lt;/span&gt;
+    &lt;span class=&quot;s&quot;&gt;&quot;math&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;url&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;http://localhost:8000/sse&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;transport&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;sse&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;})&lt;/span&gt;
+
+&lt;span class=&quot;c1&quot;&gt;# 2. サーバーに「使えるツール一覧をくれ」と問い合わせる
+&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;tools&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;await&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;client&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;get_tools&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+
+&lt;span class=&quot;c1&quot;&gt;# 3. LLMとツール定義を組み合わせてエージェントを作る
+&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;agent&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;create_agent&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;model&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;tools&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+
+&lt;span class=&quot;c1&quot;&gt;# 4. ここで初めてユーザーのプロンプトを受け付ける
+&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;result&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;await&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;agent&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;ainvoke&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;({&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;messages&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;[...]})&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;LLMには以下のようなツール定義が渡ります。&lt;/p&gt;
+
+&lt;div class=&quot;language-json highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+  &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;name&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;add&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;description&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;2つの数を足す&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;parameters&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+      &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;a&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;type&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;number&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;},&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+      &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;b&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;type&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;number&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+  &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;h3 id=&quot;ainvoke-呼び出し時&quot;&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ainvoke()&lt;/code&gt; 呼び出し時&lt;/h3&gt;
+
+&lt;p&gt;ユーザーのプロンプトが入ると、LLMにはツール定義とプロンプトが&lt;strong&gt;同時に&lt;/strong&gt;送られます。&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;┌─ システム情報 ───────────────────────────┐
+│ 使えるツール：add(a,b) / multiply(a,b)  │  ← get_tools()の結果
+└─────────────────────────────────────────┘
+┌─ ユーザーメッセージ ─────────────────────┐
+│ &quot;(3 + 5) x 12 を計算して&quot;               │  ← ainvoke()の引数
+└─────────────────────────────────────────┘
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;h3 id=&quot;ツール呼び出しの流れ&quot;&gt;ツール呼び出しの流れ&lt;/h3&gt;
+
+&lt;p&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;&quot;(3 + 5) x 12 を計算して&quot;&lt;/code&gt; に対してLLMが行う判断サイクル：&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;Human      &quot;(3 + 5) x 12 を計算して&quot;
+AI         tool_call: add(a=3, b=5)
+Tool       &quot;8&quot;
+AI         tool_call: multiply(a=8, b=12)
+Tool       &quot;96&quot;
+AI         &quot;答えは 96 です&quot;   ← result[&apos;messages&apos;][-1]
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;LLMが判断していること：&lt;/p&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;判断&lt;/th&gt;
+      &lt;th&gt;内容&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;ツール選択&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;add&lt;/code&gt; と &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;multiply&lt;/code&gt; のどちらを使うか&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;引数の組み立て&lt;/td&gt;
+      &lt;td&gt;前のツール結果を次の引数に使う&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;順序の決定&lt;/td&gt;
+      &lt;td&gt;足し算 → 掛け算の順番&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;終了判断&lt;/td&gt;
+      &lt;td&gt;これ以上ツールは不要、回答を生成する&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;この一連の判断サイクルが &lt;strong&gt;ReAct&lt;/strong&gt;（Reasoning + Acting）の正体です。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;プロセスのライフサイクル&quot;&gt;プロセスのライフサイクル&lt;/h2&gt;
+
+&lt;p&gt;LangChainとClaude.aiでMCPの寿命は異なります。&lt;/p&gt;
+
+&lt;h3 id=&quot;langchain&quot;&gt;LangChain&lt;/h3&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;n&quot;&gt;client&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;MultiServerMCPClient&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;({...})&lt;/span&gt;
+&lt;span class=&quot;n&quot;&gt;tools&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;await&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;client&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;get_tools&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;   &lt;span class=&quot;c1&quot;&gt;# ← ここで接続
+# ...
+# 関数が終わると client はGCに回収される → 接続切れ
+&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;ただし &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;subprocess.Popen&lt;/code&gt; で起動したサーバープロセスは独立して動き続けます。明示的に &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;math_proc.terminate()&lt;/code&gt; を呼ぶまで生存します。&lt;/p&gt;
+
+&lt;h3 id=&quot;claudeai&quot;&gt;claude.ai&lt;/h3&gt;
+
+&lt;p&gt;セッション単位で接続が維持されます。タブを閉じる・セッション終了でMCP接続も切れます。MCPサーバー自体はアプリ終了まで生存するのが一般的な設計です。&lt;/p&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt; &lt;/th&gt;
+      &lt;th&gt;MCP接続（クライアント側）&lt;/th&gt;
+      &lt;th&gt;MCPサーバープロセス&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;LangChain&lt;/td&gt;
+      &lt;td&gt;関数の実行中のみ&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;terminate()&lt;/code&gt; するまで生存&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;claude.ai&lt;/td&gt;
+      &lt;td&gt;セッション中は維持&lt;/td&gt;
+      &lt;td&gt;アプリ終了まで生存&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;「接続」と「プロセス」は別物として管理する必要があります。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;まとめ&quot;&gt;まとめ&lt;/h2&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;&lt;strong&gt;SSE&lt;/strong&gt;：HTTPベース、ネットワーク越しに使える、Colab向き&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;Stdio&lt;/strong&gt;：パイプベース、ローカル限定、高速、Claude Desktop向き&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;ツール定義&lt;/strong&gt;はセッション開始時に1回取得してLLMに渡す&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;ReAct&lt;/strong&gt;ループでLLMがツールを選択・実行・結果を次の引数に使う&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;プロセスと接続&lt;/strong&gt;のライフサイクルは独立して管理する&lt;/li&gt;
+&lt;/ul&gt;
+</description><description>&lt;h2 id=&quot;mcpとは&quot;&gt;MCPとは&lt;/h2&gt;
+
+</description><pubDate>Tue, 28 Apr 2026 00:00:00 +0000</pubDate>
+        <link>https://avocado-planet.github.io/blog/mcp-stdio-sse-dataflow/</link>
+        <guid isPermaLink="true">https://avocado-planet.github.io/blog/mcp-stdio-sse-dataflow/</guid></item><item>
+        <title>ReAct Agentの本質を理解する — プロンプト芸か、構造的制御か？</title>
+        <description>&lt;h1 id=&quot;react-agentの本質を理解する--プロンプト芸か構造的制御か&quot;&gt;ReAct Agentの本質を理解する — プロンプト芸か、構造的制御か？&lt;/h1&gt;
+
+&lt;h2 id=&quot;はじめに&quot;&gt;はじめに&lt;/h2&gt;
+
+&lt;p&gt;LLMベースのエージェント開発において「ReAct」は最も基本的なパターンの一つです。Thought（思考）→ Action（行動）→ Observation（観察）のサイクルを繰り返すことで、LLMが外部ツールを使いながら推論を進めます。&lt;/p&gt;
+
+&lt;p&gt;しかし、ここで根本的な疑問が生じます：&lt;/p&gt;
+
+&lt;blockquote&gt;
+  &lt;p&gt;&lt;strong&gt;このサイクルは、実質的にプロンプトの指示によるものなのか？ LLMが本当にサイクルを守るかは、LLMの判断任せなのか？&lt;/strong&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;p&gt;本記事では、この問いに対して「原初のReAct」と「現代のフレームワーク実装」の2つの視点から掘り下げます。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;1-reactの基本サイクル&quot;&gt;1. ReActの基本サイクル&lt;/h2&gt;
+
+&lt;p&gt;ReActパターン（Yao et al., 2022）は以下のサイクルで構成されます：&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;&lt;strong&gt;Thought（思考）&lt;/strong&gt; — 現状を分析し、次に何をすべきか考える&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;Action（行動）&lt;/strong&gt; — ツールを呼び出す&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;Observation（観察）&lt;/strong&gt; — ツールの実行結果を受け取る&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;1に戻る&lt;/strong&gt; — 目的が達成されるまで繰り返す&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;2-原初のreact--プロンプト--素朴なループ&quot;&gt;2. 原初のReAct — プロンプト + 素朴なループ&lt;/h2&gt;
+
+&lt;h3 id=&quot;21-few-shotによるフォーマット誘導&quot;&gt;2.1 Few-shotによるフォーマット誘導&lt;/h3&gt;
+
+&lt;p&gt;原論文のReActでは、LLMに対して&lt;strong&gt;few-shot（少数例提示）&lt;/strong&gt;でフォーマットを学ばせていました。&lt;/p&gt;
+
+&lt;p&gt;few-shotとは、プロンプトの中に「こう振る舞え」という完成例を数個入れる手法です。LLMは明示的なルール説明ではなく、&lt;strong&gt;例のパターンを模倣&lt;/strong&gt;することで所望のフォーマットに従います。&lt;/p&gt;
+
+&lt;div class=&quot;language-text highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;以下の例に従って、質問に答えてください。
+
+--- 例1 ---
+Question: コロラド造山運動の東側の地域の標高範囲は？
+Thought 1: コロラド造山運動について調べる必要がある。
+Action 1: Search[コロラド造山運動]
+Observation 1: コロラド造山運動は約3億年前に起きた造山運動で...
+Thought 2: 東側の地域について調べよう。
+Action 2: Search[High Plains 標高]
+Observation 2: High Plainsの標高は約1,800〜7,000フィート。
+Thought 3: 答えがわかった。
+Action 3: Finish[約1,800〜7,000フィート]
+
+--- 例2 ---
+(同様のパターンをもう1〜2個)
+
+--- 本番 ---
+Question: ユーザーの実際の質問
+Thought 1:
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;LLMはこのパターンを見て、「Thought → Action → Observation」の形式で出力すればいいと&lt;strong&gt;推測&lt;/strong&gt;します。&lt;/p&gt;
+
+&lt;blockquote&gt;
+  &lt;p&gt;&lt;strong&gt;補足：Few-shotの分類&lt;/strong&gt;&lt;/p&gt;
+  &lt;ul&gt;
+    &lt;li&gt;&lt;strong&gt;zero-shot&lt;/strong&gt; — 例なし。指示文だけ&lt;/li&gt;
+    &lt;li&gt;&lt;strong&gt;one-shot&lt;/strong&gt; — 例が1個&lt;/li&gt;
+    &lt;li&gt;&lt;strong&gt;few-shot&lt;/strong&gt; — 例が2〜5個&lt;/li&gt;
+  &lt;/ul&gt;
+&lt;/blockquote&gt;
+
+&lt;h3 id=&quot;22-ツール実行は誰がやるのか&quot;&gt;2.2 ツール実行は誰がやるのか？&lt;/h3&gt;
+
+&lt;p&gt;ここが重要なポイントです。&lt;strong&gt;LLMはテキストを生成するだけ&lt;/strong&gt;であり、実際にツールを実行する能力はありません。&lt;/p&gt;
+
+&lt;p&gt;原初のReActにも&lt;strong&gt;制御コード（外部のPythonプログラム）は存在していました&lt;/strong&gt;。&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;n&quot;&gt;prompt&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;few_shot_examples&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;question&lt;/span&gt;
+
+&lt;span class=&quot;k&quot;&gt;while&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;True&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;# 1. LLMに投げる（Thought + Action をテキストとして生成させる）
+&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;output&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;llm&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;prompt&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+
+    &lt;span class=&quot;c1&quot;&gt;# 2. 出力をテキストとしてパースする（正規表現等）
+&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;action&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;parse_action&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;output&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;  &lt;span class=&quot;c1&quot;&gt;# 例: &quot;Search[東京の人口]&quot;
+&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;action&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;nb&quot;&gt;type&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;==&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;Finish&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;action&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;argument&lt;/span&gt;  &lt;span class=&quot;c1&quot;&gt;# 最終回答
+&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;# 3. ツールを実際に実行する（Pythonコードがやる）
+&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;observation&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;execute_tool&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;action&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;  &lt;span class=&quot;c1&quot;&gt;# Wikipedia APIを叩く等
+&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;# 4. 結果をプロンプトに追記して次のループへ
+&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;prompt&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;output&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;sa&quot;&gt;f&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;&lt;/span&gt;&lt;span class=&quot;se&quot;&gt;\n&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;Observation: &lt;/span&gt;&lt;span class=&quot;si&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;observation&lt;/span&gt;&lt;span class=&quot;si&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;se&quot;&gt;\n&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;処理の流れを整理すると：&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;LLMが &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Action: Search[東京の人口]&lt;/code&gt; という&lt;strong&gt;文字列を出力する&lt;/strong&gt;&lt;/li&gt;
+  &lt;li&gt;外部のPythonコードがその文字列を&lt;strong&gt;正規表現でパースする&lt;/strong&gt;&lt;/li&gt;
+  &lt;li&gt;Pythonコードが実際に&lt;strong&gt;Wikipedia APIを叩く&lt;/strong&gt;&lt;/li&gt;
+  &lt;li&gt;結果を &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Observation: 東京の人口は...&lt;/code&gt; としてプロンプトに&lt;strong&gt;テキスト連結する&lt;/strong&gt;&lt;/li&gt;
+  &lt;li&gt;その拡張されたプロンプトをLLMに&lt;strong&gt;再度投げる&lt;/strong&gt;&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;つまり、「制御コードがない時代」は存在しません。LLMは常にテキストを生成するだけで、ツール実行は必ず外部コードが担います。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;3-現代のreact--フレームワークによる構造的制御&quot;&gt;3. 現代のReAct — フレームワークによる構造的制御&lt;/h2&gt;
+
+&lt;h3 id=&quot;31-構造化-tool_call-の登場&quot;&gt;3.1 構造化 tool_call の登場&lt;/h3&gt;
+
+&lt;p&gt;原初のReActには大きな弱点がありました。LLMの出力は自由テキストなので、正規表現でのパースが壊れやすいのです。&lt;/p&gt;
+
+&lt;p&gt;この問題を解決したのが、&lt;strong&gt;LLMプロバイダー自身によるAPI仕様の構造化&lt;/strong&gt;です。&lt;/p&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;プロバイダー&lt;/th&gt;
+      &lt;th&gt;API仕様&lt;/th&gt;
+      &lt;th&gt;導入時期&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;OpenAI&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tool_calls&lt;/code&gt; フィールド&lt;/td&gt;
+      &lt;td&gt;2023年6月〜&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;Anthropic（Claude）&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tool_use&lt;/code&gt; content block&lt;/td&gt;
+      &lt;td&gt;2024年4月〜&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;Google（Gemini）&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;function_call&lt;/code&gt; パート&lt;/td&gt;
+      &lt;td&gt;—&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;&lt;strong&gt;以前（自由テキスト時代）：&lt;/strong&gt;&lt;/p&gt;
+
+&lt;div class=&quot;language-text highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;LLMの出力: &quot;Thought: I need to search.\nAction: Search[東京の人口]&quot;
+→ 開発者が正規表現でパースする（壊れやすい）
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;&lt;strong&gt;現在（API構造化）：&lt;/strong&gt;&lt;/p&gt;
+
+&lt;div class=&quot;language-json highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+  &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;tool_calls&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+      &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;function&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+        &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;name&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;search&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+        &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;arguments&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;{&lt;/span&gt;&lt;span class=&quot;se&quot;&gt;\&quot;&lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;query&lt;/span&gt;&lt;span class=&quot;se&quot;&gt;\&quot;&lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;: &lt;/span&gt;&lt;span class=&quot;se&quot;&gt;\&quot;&lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;東京の人口&lt;/span&gt;&lt;span class=&quot;se&quot;&gt;\&quot;&lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;}&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+      &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+    &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+  &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
+&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;これはLLMの出力テキストではなく、&lt;strong&gt;APIレスポンスの構造化フィールド&lt;/strong&gt;です。正規表現でパースする必要がなく、LLMが「フォーマットを守るかどうか」の不確実性が排除されました。&lt;/p&gt;
+
+&lt;blockquote&gt;
+  &lt;p&gt;&lt;strong&gt;この構造化はLangChainが標準化したのではなく、LLMプロバイダー（OpenAI、Anthropic、Google等）がAPI仕様として定義したもの&lt;/strong&gt;です。LangChainはこれらプロバイダーごとの差異を統一的なインターフェースに抽象化しているだけです。&lt;/p&gt;
+&lt;/blockquote&gt;
+
+&lt;div class=&quot;language-text highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;OpenAI tool_calls ──┐
+Anthropic tool_use ──┼→ LangChain 統一 ToolCall → LangGraph のルーティング
+Gemini function_call ┘
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;h3 id=&quot;32-フレームワークがサイクルを強制する&quot;&gt;3.2 フレームワークがサイクルを強制する&lt;/h3&gt;
+
+&lt;p&gt;LangChainの &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;create_react_agent&lt;/code&gt; やLangGraphでは、&lt;strong&gt;フレームワークのコード（グラフのエッジ）がサイクルの構造を制御&lt;/strong&gt;しています：&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;LLMの出力をパースする — &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tool_call&lt;/code&gt; が返ったかどうかを判定&lt;/li&gt;
+  &lt;li&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tool_call&lt;/code&gt; があれば → ツールを実行 → 結果をメッセージに追加 → LLMに再度投げる&lt;/li&gt;
+  &lt;li&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tool_call&lt;/code&gt; がなければ → 最終回答として終了&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;div class=&quot;language-text highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;[LLM呼び出し]
+     │
+     ├─ tool_call あり → [ツール実行] → [結果追加] → [LLM呼び出し] に戻る
+     │
+     └─ tool_call なし → [終了・回答返却]
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;この分岐ロジックはPythonコード（LangGraphではconditional edge）であり、&lt;strong&gt;LLMの「気分」に左右されません&lt;/strong&gt;。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;4-制御の境界線--誰が何を制御しているか&quot;&gt;4. 制御の境界線 — 誰が何を制御しているか&lt;/h2&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;側面&lt;/th&gt;
+      &lt;th&gt;誰が制御？&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;サイクルの&lt;strong&gt;構造&lt;/strong&gt;（ループ・分岐）&lt;/td&gt;
+      &lt;td&gt;フレームワーク（コード）&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;サイクルの&lt;strong&gt;中身&lt;/strong&gt;（何を考え、何を呼ぶか）&lt;/td&gt;
+      &lt;td&gt;LLM&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;終了条件の&lt;strong&gt;判定ロジック&lt;/strong&gt;&lt;/td&gt;
+      &lt;td&gt;フレームワーク（tool_callの有無）&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;終了の&lt;strong&gt;意思決定&lt;/strong&gt;&lt;/td&gt;
+      &lt;td&gt;LLM（tool_callを出すか出さないか）&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;LLMに任されている部分：&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;&lt;strong&gt;いつツールを呼ぶか&lt;/strong&gt;（どのタイミングでAction）&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;どのツールをどの引数で呼ぶか&lt;/strong&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;いつ終了するか&lt;/strong&gt;（tool_callを出さない ＝ 終了の意思表示）&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;Thoughtの質&lt;/strong&gt;（推論の正確さ）&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;5-原初と現代の比較まとめ&quot;&gt;5. 原初と現代の比較まとめ&lt;/h2&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;観点&lt;/th&gt;
+      &lt;th&gt;原初のReAct&lt;/th&gt;
+      &lt;th&gt;現代（LangChain/LangGraph等）&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;LLMの出力形式&lt;/td&gt;
+      &lt;td&gt;自由テキスト &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Action: Search[X]&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;構造化された &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tool_call&lt;/code&gt; JSON&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;パース方法&lt;/td&gt;
+      &lt;td&gt;正規表現（壊れやすい）&lt;/td&gt;
+      &lt;td&gt;APIレベルで構造化（堅牢）&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;ループ制御&lt;/td&gt;
+      &lt;td&gt;素朴なwhileループ&lt;/td&gt;
+      &lt;td&gt;グラフ構造（LangGraph）&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;ツール実行&lt;/td&gt;
+      &lt;td&gt;外部コードが実行&lt;/td&gt;
+      &lt;td&gt;外部コードが実行（同じ）&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;フォーマット遵守&lt;/td&gt;
+      &lt;td&gt;LLMの模倣能力に依存&lt;/td&gt;
+      &lt;td&gt;APIが構造を保証&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;6-結論&quot;&gt;6. 結論&lt;/h2&gt;
+
+&lt;p&gt;「ReActはプロンプトだけで実現している」は初期の素朴な実装には部分的に当てはまりますが、本質的には&lt;strong&gt;プロンプト（LLMの判断）＋ コード（構造的強制）のハイブリッド&lt;/strong&gt;です。&lt;/p&gt;
+
+&lt;p&gt;原初のReActにも外部の制御コードは存在しており、LLMは常に「テキストを出力するだけ」の存在でした。現代のフレームワークでは、構造化tool_callとグラフベースのルーティングにより、LLMに「サイクルを守れ」と祈る必要はなくなり、&lt;strong&gt;コードが構造を保証する&lt;/strong&gt;設計に進化しています。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;参考&quot;&gt;参考&lt;/h2&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;Yao, S. et al. (2022). &lt;em&gt;ReAct: Synergizing Reasoning and Acting in Language Models&lt;/em&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;https://python.langchain.com/&quot;&gt;LangChain Documentation&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;https://langchain-ai.github.io/langgraph/&quot;&gt;LangGraph Documentation&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;https://platform.openai.com/docs/guides/function-calling&quot;&gt;OpenAI Function Calling&lt;/a&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;a href=&quot;https://docs.anthropic.com/en/docs/build-with-claude/tool-use/overview&quot;&gt;Anthropic Tool Use&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+</description><description>&lt;h1 id=&quot;react-agentの本質を理解する--プロンプト芸か構造的制御か&quot;&gt;ReAct Agentの本質を理解する — プロンプト芸か、構造的制御か？&lt;/h1&gt;
+
+</description><pubDate>Sun, 19 Apr 2026 00:00:00 +0000</pubDate>
+        <link>https://avocado-planet.github.io/blog/react-agent-deep-dive/</link>
+        <guid isPermaLink="true">https://avocado-planet.github.io/blog/react-agent-deep-dive/</guid></item><item>
+        <title>深層学習・誤差逆伝播法</title>
+        <description>&lt;h2 id=&quot;1-誤差逆伝播法backpropagationとは&quot;&gt;1. 誤差逆伝播法（Backpropagation）とは&lt;/h2&gt;
 
 &lt;p&gt;ニューラルネットワークが「ミスから学ぶ」仕組み。&lt;/p&gt;
 
@@ -646,10 +1292,11 @@ x₂=0 なので w₂₁ の z₁ への貢献がゼロ → 責任もゼロ → 
     &lt;/tr&gt;
   &lt;/tbody&gt;
 &lt;/table&gt;
-</description><description>&lt;h1 id=&quot;深層学習誤差逆伝播法&quot;&gt;深層学習・誤差逆伝播法&lt;/h1&gt;
-</description><pubDate>Thu, 16 Apr 2026 00:00:00 +0900</pubDate>
-        <link>https://long-haul.netlify.app/blog/example-post-formatting/</link>
-        <guid isPermaLink="true">https://long-haul.netlify.app/blog/example-post-formatting/</guid></item><item>
+</description><description>&lt;h2 id=&quot;1-誤差逆伝播法backpropagationとは&quot;&gt;1. 誤差逆伝播法（Backpropagation）とは&lt;/h2&gt;
+
+</description><pubDate>Thu, 16 Apr 2026 00:00:00 +0000</pubDate>
+        <link>https://avocado-planet.github.io/blog/Backpropagation/</link>
+        <guid isPermaLink="true">https://avocado-planet.github.io/blog/Backpropagation/</guid></item><item>
         <title>Featured Image</title>
         <description>&lt;p class=&quot;intro&quot;&gt;&lt;span class=&quot;dropcap&quot;&gt;L&lt;/span&gt;orem ipsum thor smash liege-bastogne-liege landbouwkrediet ombregt krabbe, rouleur derby is for lovers bonk giro gilbert bidon. Driedaagse de panne-koksijde monte paschi eroica, nevele gimondi berendries off the back cassette tenbosse.&lt;/p&gt;
 
@@ -663,9 +1310,10 @@ x₂=0 なので w₂₁ の z₁ への貢献がゼロ → 責任もゼロ → 
 
 &lt;p&gt;Nyvelocity pyrenees vande velde merckx. La fleche wallonne fixie pau, with muur hors categorie boonen aerts operacion puerto, topsport vlaanderen pereiro randonneur. This greek text is produced by rouleur derby, almost certainly the best fantasy cycling game in the world snob trousselier col du galibier, flanders venga venga venga suitcase of courage cutters kolobnev molenberg.&lt;/p&gt;
 </description><description>&lt;p class=&quot;intro&quot;&gt;&lt;span class=&quot;dropcap&quot;&gt;L&lt;/span&gt;orem ipsum thor smash liege-bastogne-liege landbouwkrediet ombregt krabbe, rouleur derby is for lovers bonk giro gilbert bidon. Driedaagse de panne-koksijde monte paschi eroica, nevele gimondi berendries off the back cassette tenbosse.&lt;/p&gt;
-</description><pubDate>Sun, 14 Dec 2014 00:00:00 +0900</pubDate>
-        <link>https://long-haul.netlify.app/blog/featured-image/</link>
-        <guid isPermaLink="true">https://long-haul.netlify.app/blog/featured-image/</guid></item><item>
+
+</description><pubDate>Sun, 14 Dec 2014 00:00:00 +0000</pubDate>
+        <link>https://avocado-planet.github.io/blog/featured-image/</link>
+        <guid isPermaLink="true">https://avocado-planet.github.io/blog/featured-image/</guid></item><item>
         <title>Post With A Code Snippet</title>
         <description>&lt;p class=&quot;intro&quot;&gt;&lt;span class=&quot;dropcap&quot;&gt;Y&lt;/span&gt;ou&apos;ll find this post in your `_posts` directory - edit this post and re-build (or run with the `-w` switch) to see your changes! To add new posts, simply add a file in the `_posts` directory that follows the convention: YYYY-MM-DD-name-of-post.ext.&lt;/p&gt;
 
@@ -678,9 +1326,10 @@ x₂=0 なので w₂₁ の z₁ への貢献がゼロ → 責任もゼロ → 
 &lt;p&gt;Check out the &lt;a href=&quot;http://jekyllrb.com&quot;&gt;Jekyll docs&lt;/a&gt; for more info on how to get the most out of Jekyll. File all bugs/feature requests at &lt;a href=&quot;https://github.com/mojombo/jekyll&quot;&gt;Jekyll’s GitHub repo&lt;/a&gt;.&lt;/p&gt;
 
 </description><description>&lt;p class=&quot;intro&quot;&gt;&lt;span class=&quot;dropcap&quot;&gt;Y&lt;/span&gt;ou&apos;ll find this post in your `_posts` directory - edit this post and re-build (or run with the `-w` switch) to see your changes! To add new posts, simply add a file in the `_posts` directory that follows the convention: YYYY-MM-DD-name-of-post.ext.&lt;/p&gt;
-</description><pubDate>Sat, 13 Dec 2014 00:00:00 +0900</pubDate>
-        <link>https://long-haul.netlify.app/blog/code-snippet/</link>
-        <guid isPermaLink="true">https://long-haul.netlify.app/blog/code-snippet/</guid></item><item>
+
+</description><pubDate>Sat, 13 Dec 2014 00:00:00 +0000</pubDate>
+        <link>https://avocado-planet.github.io/blog/code-snippet/</link>
+        <guid isPermaLink="true">https://avocado-planet.github.io/blog/code-snippet/</guid></item><item>
         <title>Figure With A Caption</title>
         <description>&lt;p class=&quot;intro&quot;&gt;&lt;span class=&quot;dropcap&quot;&gt;L&lt;/span&gt;orem ipsum thor smash liege-bastogne-liege landbouwkrediet ombregt krabbe, rouleur derby is for lovers bonk giro gilbert bidon. Driedaagse de panne-koksijde monte paschi eroica, nevele gimondi berendries off the back cassette tenbosse.&lt;/p&gt;
 
@@ -702,9 +1351,10 @@ x₂=0 なので w₂₁ の z₁ への貢献がゼロ → 責任もゼロ → 
 
 &lt;p&gt;Nyvelocity pyrenees vande velde merckx. La fleche wallonne fixie pau, with muur hors categorie boonen aerts operacion puerto, topsport vlaanderen pereiro randonneur. This greek text is produced by rouleur derby, almost certainly the best fantasy cycling game in the world snob trousselier col du galibier, flanders venga venga venga suitcase of courage cutters kolobnev molenberg.&lt;/p&gt;
 </description><description>&lt;p class=&quot;intro&quot;&gt;&lt;span class=&quot;dropcap&quot;&gt;L&lt;/span&gt;orem ipsum thor smash liege-bastogne-liege landbouwkrediet ombregt krabbe, rouleur derby is for lovers bonk giro gilbert bidon. Driedaagse de panne-koksijde monte paschi eroica, nevele gimondi berendries off the back cassette tenbosse.&lt;/p&gt;
-</description><pubDate>Fri, 12 Dec 2014 00:00:00 +0900</pubDate>
-        <link>https://long-haul.netlify.app/blog/figure-with-caption/</link>
-        <guid isPermaLink="true">https://long-haul.netlify.app/blog/figure-with-caption/</guid></item><item>
+
+</description><pubDate>Fri, 12 Dec 2014 00:00:00 +0000</pubDate>
+        <link>https://avocado-planet.github.io/blog/figure-with-caption/</link>
+        <guid isPermaLink="true">https://avocado-planet.github.io/blog/figure-with-caption/</guid></item><item>
         <title>Image in Post</title>
         <description>&lt;p class=&quot;intro&quot;&gt;&lt;span class=&quot;dropcap&quot;&gt;L&lt;/span&gt;orem ipsum thor smash liege-bastogne-liege landbouwkrediet ombregt krabbe, rouleur derby is for lovers bonk giro gilbert bidon. Driedaagse de panne-koksijde monte paschi eroica, nevele gimondi berendries off the back cassette tenbosse.&lt;/p&gt;
 
@@ -720,9 +1370,10 @@ x₂=0 なので w₂₁ の z₁ への貢献がゼロ → 責任もゼロ → 
 
 &lt;p&gt;Nyvelocity pyrenees vande velde merckx. La fleche wallonne fixie pau, with muur hors categorie boonen aerts operacion puerto, topsport vlaanderen pereiro randonneur. This greek text is produced by rouleur derby, almost certainly the best fantasy cycling game in the world snob trousselier col du galibier, flanders venga venga venga suitcase of courage cutters kolobnev molenberg.&lt;/p&gt;
 </description><description>&lt;p class=&quot;intro&quot;&gt;&lt;span class=&quot;dropcap&quot;&gt;L&lt;/span&gt;orem ipsum thor smash liege-bastogne-liege landbouwkrediet ombregt krabbe, rouleur derby is for lovers bonk giro gilbert bidon. Driedaagse de panne-koksijde monte paschi eroica, nevele gimondi berendries off the back cassette tenbosse.&lt;/p&gt;
-</description><pubDate>Thu, 11 Dec 2014 00:00:00 +0900</pubDate>
-        <link>https://long-haul.netlify.app/blog/image-in-post/</link>
-        <guid isPermaLink="true">https://long-haul.netlify.app/blog/image-in-post/</guid></item><item>
+
+</description><pubDate>Thu, 11 Dec 2014 00:00:00 +0000</pubDate>
+        <link>https://avocado-planet.github.io/blog/image-in-post/</link>
+        <guid isPermaLink="true">https://avocado-planet.github.io/blog/image-in-post/</guid></item><item>
         <title>Test Post</title>
         <description>&lt;p class=&quot;intro&quot;&gt;&lt;span class=&quot;dropcap&quot;&gt;L&lt;/span&gt;orem ipsum thor smash liege-bastogne-liege landbouwkrediet ombregt krabbe, rouleur derby is for lovers bonk giro gilbert bidon. Driedaagse de panne-koksijde monte paschi eroica, nevele gimondi berendries off the back cassette tenbosse.&lt;/p&gt;
 
@@ -736,7 +1387,8 @@ x₂=0 なので w₂₁ の z₁ への貢献がゼロ → 責任もゼロ → 
 
 &lt;p&gt;Nyvelocity pyrenees vande velde merckx. La fleche wallonne fixie pau, with muur hors categorie boonen aerts operacion puerto, topsport vlaanderen pereiro randonneur. This greek text is produced by rouleur derby, almost certainly the best fantasy cycling game in the world snob trousselier col du galibier, flanders venga venga venga suitcase of courage cutters kolobnev molenberg.&lt;/p&gt;
 </description><description>&lt;p class=&quot;intro&quot;&gt;&lt;span class=&quot;dropcap&quot;&gt;L&lt;/span&gt;orem ipsum thor smash liege-bastogne-liege landbouwkrediet ombregt krabbe, rouleur derby is for lovers bonk giro gilbert bidon. Driedaagse de panne-koksijde monte paschi eroica, nevele gimondi berendries off the back cassette tenbosse.&lt;/p&gt;
-</description><pubDate>Wed, 10 Dec 2014 00:00:00 +0900</pubDate>
-        <link>https://long-haul.netlify.app/blog/test-post/</link>
-        <guid isPermaLink="true">https://long-haul.netlify.app/blog/test-post/</guid></item></channel>
+
+</description><pubDate>Wed, 10 Dec 2014 00:00:00 +0000</pubDate>
+        <link>https://avocado-planet.github.io/blog/test-post/</link>
+        <guid isPermaLink="true">https://avocado-planet.github.io/blog/test-post/</guid></item></channel>
 </rss>
