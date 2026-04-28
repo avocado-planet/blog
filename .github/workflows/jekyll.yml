@@ -1,0 +1,33 @@
+name: Build and Deploy Jekyll
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+
+      - name: Build Jekyll
+        run: bundle exec jekyll build -d docs
+
+      - name: Commit and push docs/
+        run: |
+          git config user.email "github-actions@github.com"
+          git config user.name "GitHub Actions"
+          git add docs/
+          git diff --staged --quiet || git commit -m "Auto build: update docs/ [skip ci]"
+          git push
