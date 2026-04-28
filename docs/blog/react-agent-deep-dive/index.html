@@ -6,12 +6,48 @@
 	<meta charset="utf-8" />
 	<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
-	<meta name="description" content="ReAct Agentのサイクルは本当にプロンプトだけで実現しているのか？原初の実装から現代のフレームワークまで、その本質を解説します。" />
+	<meta name="description" content="" />
 	<title>ReAct Agentの本質を理解する — プロンプト芸か、構造的制御か？</title>
+
+	<!-- Open Graph Meta -->
+	<meta content="Long Haul" property="og:site_name" /><meta content="ReAct Agentの本質を理解する — プロンプト芸か、構造的制御か？" property="og:title" /><meta content="article" property="og:type" /><meta content="ReAct Agentのサイクルは本当にプロンプトだけで実現しているのか？原初の実装から現代のフレームワークまで、その本質を解説します。" property="og:description" /><meta content="https://avocado-planet.github.io/blog/blog/react-agent-deep-dive/" property="og:url" /><meta
+		content="2026-04-19T00:00:00+00:00"
+		property="article:published_time"
+	/>
+	<meta content="https://avocado-planet.github.io/blog/about/" property="article:author" /><meta
+		content="https://avocado-planet.github.io/blog/assets/img/touring.jpg"
+		property="og:image"
+	/><!-- Twitter Cards -->
+	<meta name="twitter:card" content="summary" />
+	<meta name="twitter:site" content="@brianmaierjr" />
+	<meta name="twitter:creator" content="@brianmaierjr" /><meta name="twitter:title" content="ReAct Agentの本質を理解する — プロンプト芸か、構造的制御か？" /><meta name="twitter:url" content="https://avocado-planet.github.io/blog/blog/react-agent-deep-dive/" /><meta name="twitter:description" content="ReAct Agentのサイクルは本当にプロンプトだけで実現しているのか？原初の実装から現代のフレームワークまで、その本質を解説します。" /><meta
+		name="twitter:image:src"
+		content="https://avocado-planet.github.io/blog/assets/img/touring.jpg"
+	/><!-- Favicon -->
 	<link rel="icon" type="image/x-icon" href=""/>
-	<link rel="alternate" type="application/rss+xml" title="Long Haul" href="https://avocado-planet.github.io/blog/feed.xml" />
+
+	<!-- Come and get me RSS readers -->
+	<link rel="alternate" type="application/rss+xml" title="Long Haul"
+	href="https://avocado-planet.github.io/blog/feed.xml" />
+
+	<!-- Stylesheet -->
 	<link rel="stylesheet" href="/blog/assets/css/style.css" />
-	<link rel="canonical" href="https://avocado-planet.github.io/blog/blog/react-agent-deep-dive/" />
+
+	<!-- Canonical URL -->
+	<link
+		rel="canonical"
+		href="https://avocado-planet.github.io/blog/blog/react-agent-deep-dive/"
+	/><!-- Google Analytics: change UA-XXXXX-X to be your site's ID. -->
+<script>
+   (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+    (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+    m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+    })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+ga('create', 'UA-58263416-1', 'auto');
+ga('send', 'pageview');
+
+</script>
 </head>
 <body> <div class="header ">
      <div class="container">
@@ -23,7 +59,8 @@
                      <a href="/blog/about">About</a>
                  </li><li class="elementlast">
                      <a href="/blog/contact">Contact</a>
-                 </li>
+                 </li><li> <a href="https://github.com/brianmaierjr/long-haul" target="_blank">GitHub</a></li>
+                 <li><a href="https://github.com/brianmaierjr/long-haul/archive/master.zip">Download Theme</a></li>
              </ul>
          </nav>
      </div>
@@ -32,31 +69,47 @@
       <div class="container">
          <article class="post"><header>
     <h1 class="postTitle">ReAct Agentの本質を理解する — プロンプト芸か、構造的制御か？</h1>
-    <p class="meta">April 19, 2026</p>
+    <p class="meta">April 19, 2026 | <span class="time">3</span> Minute Read</p>
   </header>
-  <h1>ReAct Agentの本質を理解する — プロンプト芸か、構造的制御か？</h1>
-<h2>はじめに</h2>
+
+  <h1 id="react-agentの本質を理解する--プロンプト芸か構造的制御か">ReAct Agentの本質を理解する — プロンプト芸か、構造的制御か？</h1>
+
+<h2 id="はじめに">はじめに</h2>
+
 <p>LLMベースのエージェント開発において「ReAct」は最も基本的なパターンの一つです。Thought（思考）→ Action（行動）→ Observation（観察）のサイクルを繰り返すことで、LLMが外部ツールを使いながら推論を進めます。</p>
+
 <p>しかし、ここで根本的な疑問が生じます：</p>
+
 <blockquote>
-<p><strong>このサイクルは、実質的にプロンプトの指示によるものなのか？ LLMが本当にサイクルを守るかは、LLMの判断任せなのか？</strong></p>
+  <p><strong>このサイクルは、実質的にプロンプトの指示によるものなのか？ LLMが本当にサイクルを守るかは、LLMの判断任せなのか？</strong></p>
 </blockquote>
+
 <p>本記事では、この問いに対して「原初のReAct」と「現代のフレームワーク実装」の2つの視点から掘り下げます。</p>
+
 <hr />
-<h2>1. ReActの基本サイクル</h2>
+
+<h2 id="1-reactの基本サイクル">1. ReActの基本サイクル</h2>
+
 <p>ReActパターン（Yao et al., 2022）は以下のサイクルで構成されます：</p>
+
 <ol>
-<li><strong>Thought（思考）</strong> — 現状を分析し、次に何をすべきか考える</li>
-<li><strong>Action（行動）</strong> — ツールを呼び出す</li>
-<li><strong>Observation（観察）</strong> — ツールの実行結果を受け取る</li>
-<li><strong>1に戻る</strong> — 目的が達成されるまで繰り返す</li>
+  <li><strong>Thought（思考）</strong> — 現状を分析し、次に何をすべきか考える</li>
+  <li><strong>Action（行動）</strong> — ツールを呼び出す</li>
+  <li><strong>Observation（観察）</strong> — ツールの実行結果を受け取る</li>
+  <li><strong>1に戻る</strong> — 目的が達成されるまで繰り返す</li>
 </ol>
+
 <hr />
-<h2>2. 原初のReAct — プロンプト + 素朴なループ</h2>
-<h3>2.1 Few-shotによるフォーマット誘導</h3>
+
+<h2 id="2-原初のreact--プロンプト--素朴なループ">2. 原初のReAct — プロンプト + 素朴なループ</h2>
+
+<h3 id="21-few-shotによるフォーマット誘導">2.1 Few-shotによるフォーマット誘導</h3>
+
 <p>原論文のReActでは、LLMに対して<strong>few-shot（少数例提示）</strong>でフォーマットを学ばせていました。</p>
+
 <p>few-shotとは、プロンプトの中に「こう振る舞え」という完成例を数個入れる手法です。LLMは明示的なルール説明ではなく、<strong>例のパターンを模倣</strong>することで所望のフォーマットに従います。</p>
-<pre><code class="language-text">以下の例に従って、質問に答えてください。
+
+<div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>以下の例に従って、質問に答えてください。
 
 --- 例1 ---
 Question: コロラド造山運動の東側の地域の標高範囲は？
@@ -75,206 +128,459 @@ Action 3: Finish[約1,800〜7,000フィート]
 --- 本番 ---
 Question: ユーザーの実際の質問
 Thought 1:
-</code></pre>
+</code></pre></div></div>
+
 <p>LLMはこのパターンを見て、「Thought → Action → Observation」の形式で出力すればいいと<strong>推測</strong>します。</p>
+
 <blockquote>
-<p><strong>補足：Few-shotの分類</strong>
-- <strong>zero-shot</strong> — 例なし。指示文だけ
-- <strong>one-shot</strong> — 例が1個
-- <strong>few-shot</strong> — 例が2〜5個</p>
+  <p><strong>補足：Few-shotの分類</strong></p>
+  <ul>
+    <li><strong>zero-shot</strong> — 例なし。指示文だけ</li>
+    <li><strong>one-shot</strong> — 例が1個</li>
+    <li><strong>few-shot</strong> — 例が2〜5個</li>
+  </ul>
 </blockquote>
-<h3>2.2 ツール実行は誰がやるのか？</h3>
+
+<h3 id="22-ツール実行は誰がやるのか">2.2 ツール実行は誰がやるのか？</h3>
+
 <p>ここが重要なポイントです。<strong>LLMはテキストを生成するだけ</strong>であり、実際にツールを実行する能力はありません。</p>
+
 <p>原初のReActにも<strong>制御コード（外部のPythonプログラム）は存在していました</strong>。</p>
-<pre><code class="language-python">prompt = few_shot_examples + question
 
-while True:
-    # 1. LLMに投げる（Thought + Action をテキストとして生成させる）
-    output = llm(prompt)
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">prompt</span> <span class="o">=</span> <span class="n">few_shot_examples</span> <span class="o">+</span> <span class="n">question</span>
 
-    # 2. 出力をテキストとしてパースする（正規表現等）
-    action = parse_action(output)  # 例: &quot;Search[東京の人口]&quot;
+<span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
+    <span class="c1"># 1. LLMに投げる（Thought + Action をテキストとして生成させる）
+</span>    <span class="n">output</span> <span class="o">=</span> <span class="n">llm</span><span class="p">(</span><span class="n">prompt</span><span class="p">)</span>
 
-    if action.type == &quot;Finish&quot;:
-        return action.argument  # 最終回答
+    <span class="c1"># 2. 出力をテキストとしてパースする（正規表現等）
+</span>    <span class="n">action</span> <span class="o">=</span> <span class="n">parse_action</span><span class="p">(</span><span class="n">output</span><span class="p">)</span>  <span class="c1"># 例: "Search[東京の人口]"
+</span>
+    <span class="k">if</span> <span class="n">action</span><span class="p">.</span><span class="nb">type</span> <span class="o">==</span> <span class="s">"Finish"</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">action</span><span class="p">.</span><span class="n">argument</span>  <span class="c1"># 最終回答
+</span>
+    <span class="c1"># 3. ツールを実際に実行する（Pythonコードがやる）
+</span>    <span class="n">observation</span> <span class="o">=</span> <span class="n">execute_tool</span><span class="p">(</span><span class="n">action</span><span class="p">)</span>  <span class="c1"># Wikipedia APIを叩く等
+</span>
+    <span class="c1"># 4. 結果をプロンプトに追記して次のループへ
+</span>    <span class="n">prompt</span> <span class="o">+=</span> <span class="n">output</span> <span class="o">+</span> <span class="sa">f</span><span class="s">"</span><span class="se">\n</span><span class="s">Observation: </span><span class="si">{</span><span class="n">observation</span><span class="si">}</span><span class="se">\n</span><span class="s">"</span>
+</code></pre></div></div>
 
-    # 3. ツールを実際に実行する（Pythonコードがやる）
-    observation = execute_tool(action)  # Wikipedia APIを叩く等
-
-    # 4. 結果をプロンプトに追記して次のループへ
-    prompt += output + f&quot;\nObservation: {observation}\n&quot;
-</code></pre>
 <p>処理の流れを整理すると：</p>
+
 <ol>
-<li>LLMが <code>Action: Search[東京の人口]</code> という<strong>文字列を出力する</strong></li>
-<li>外部のPythonコードがその文字列を<strong>正規表現でパースする</strong></li>
-<li>Pythonコードが実際に<strong>Wikipedia APIを叩く</strong></li>
-<li>結果を <code>Observation: 東京の人口は...</code> としてプロンプトに<strong>テキスト連結する</strong></li>
-<li>その拡張されたプロンプトをLLMに<strong>再度投げる</strong></li>
+  <li>LLMが <code class="language-plaintext highlighter-rouge">Action: Search[東京の人口]</code> という<strong>文字列を出力する</strong></li>
+  <li>外部のPythonコードがその文字列を<strong>正規表現でパースする</strong></li>
+  <li>Pythonコードが実際に<strong>Wikipedia APIを叩く</strong></li>
+  <li>結果を <code class="language-plaintext highlighter-rouge">Observation: 東京の人口は...</code> としてプロンプトに<strong>テキスト連結する</strong></li>
+  <li>その拡張されたプロンプトをLLMに<strong>再度投げる</strong></li>
 </ol>
+
 <p>つまり、「制御コードがない時代」は存在しません。LLMは常にテキストを生成するだけで、ツール実行は必ず外部コードが担います。</p>
+
 <hr />
-<h2>3. 現代のReAct — フレームワークによる構造的制御</h2>
-<h3>3.1 構造化 tool_call の登場</h3>
+
+<h2 id="3-現代のreact--フレームワークによる構造的制御">3. 現代のReAct — フレームワークによる構造的制御</h2>
+
+<h3 id="31-構造化-tool_call-の登場">3.1 構造化 tool_call の登場</h3>
+
 <p>原初のReActには大きな弱点がありました。LLMの出力は自由テキストなので、正規表現でのパースが壊れやすいのです。</p>
+
 <p>この問題を解決したのが、<strong>LLMプロバイダー自身によるAPI仕様の構造化</strong>です。</p>
+
 <table>
-<thead>
-<tr>
-<th>プロバイダー</th>
-<th>API仕様</th>
-<th>導入時期</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>OpenAI</td>
-<td><code>tool_calls</code> フィールド</td>
-<td>2023年6月〜</td>
-</tr>
-<tr>
-<td>Anthropic（Claude）</td>
-<td><code>tool_use</code> content block</td>
-<td>2024年4月〜</td>
-</tr>
-<tr>
-<td>Google（Gemini）</td>
-<td><code>function_call</code> パート</td>
-<td>—</td>
-</tr>
-</tbody>
+  <thead>
+    <tr>
+      <th>プロバイダー</th>
+      <th>API仕様</th>
+      <th>導入時期</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>OpenAI</td>
+      <td><code class="language-plaintext highlighter-rouge">tool_calls</code> フィールド</td>
+      <td>2023年6月〜</td>
+    </tr>
+    <tr>
+      <td>Anthropic（Claude）</td>
+      <td><code class="language-plaintext highlighter-rouge">tool_use</code> content block</td>
+      <td>2024年4月〜</td>
+    </tr>
+    <tr>
+      <td>Google（Gemini）</td>
+      <td><code class="language-plaintext highlighter-rouge">function_call</code> パート</td>
+      <td>—</td>
+    </tr>
+  </tbody>
 </table>
+
 <p><strong>以前（自由テキスト時代）：</strong></p>
-<pre><code class="language-text">LLMの出力: &quot;Thought: I need to search.\nAction: Search[東京の人口]&quot;
+
+<div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>LLMの出力: "Thought: I need to search.\nAction: Search[東京の人口]"
 → 開発者が正規表現でパースする（壊れやすい）
-</code></pre>
+</code></pre></div></div>
+
 <p><strong>現在（API構造化）：</strong></p>
-<pre><code class="language-json">{
-  &quot;tool_calls&quot;: [
-    {
-      &quot;function&quot;: {
-        &quot;name&quot;: &quot;search&quot;,
-        &quot;arguments&quot;: &quot;{\&quot;query\&quot;: \&quot;東京の人口\&quot;}&quot;
-      }
-    }
-  ]
-}
-</code></pre>
+
+<div class="language-json highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">{</span><span class="w">
+  </span><span class="nl">"tool_calls"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="w">
+    </span><span class="p">{</span><span class="w">
+      </span><span class="nl">"function"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+        </span><span class="nl">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"search"</span><span class="p">,</span><span class="w">
+        </span><span class="nl">"arguments"</span><span class="p">:</span><span class="w"> </span><span class="s2">"{</span><span class="se">\"</span><span class="s2">query</span><span class="se">\"</span><span class="s2">: </span><span class="se">\"</span><span class="s2">東京の人口</span><span class="se">\"</span><span class="s2">}"</span><span class="w">
+      </span><span class="p">}</span><span class="w">
+    </span><span class="p">}</span><span class="w">
+  </span><span class="p">]</span><span class="w">
+</span><span class="p">}</span><span class="w">
+</span></code></pre></div></div>
+
 <p>これはLLMの出力テキストではなく、<strong>APIレスポンスの構造化フィールド</strong>です。正規表現でパースする必要がなく、LLMが「フォーマットを守るかどうか」の不確実性が排除されました。</p>
+
 <blockquote>
-<p><strong>この構造化はLangChainが標準化したのではなく、LLMプロバイダー（OpenAI、Anthropic、Google等）がAPI仕様として定義したもの</strong>です。LangChainはこれらプロバイダーごとの差異を統一的なインターフェースに抽象化しているだけです。</p>
+  <p><strong>この構造化はLangChainが標準化したのではなく、LLMプロバイダー（OpenAI、Anthropic、Google等）がAPI仕様として定義したもの</strong>です。LangChainはこれらプロバイダーごとの差異を統一的なインターフェースに抽象化しているだけです。</p>
 </blockquote>
-<pre><code class="language-text">OpenAI tool_calls ──┐
+
+<div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>OpenAI tool_calls ──┐
 Anthropic tool_use ──┼→ LangChain 統一 ToolCall → LangGraph のルーティング
 Gemini function_call ┘
-</code></pre>
-<h3>3.2 フレームワークがサイクルを強制する</h3>
-<p>LangChainの <code>create_react_agent</code> やLangGraphでは、<strong>フレームワークのコード（グラフのエッジ）がサイクルの構造を制御</strong>しています：</p>
+</code></pre></div></div>
+
+<h3 id="32-フレームワークがサイクルを強制する">3.2 フレームワークがサイクルを強制する</h3>
+
+<p>LangChainの <code class="language-plaintext highlighter-rouge">create_react_agent</code> やLangGraphでは、<strong>フレームワークのコード（グラフのエッジ）がサイクルの構造を制御</strong>しています：</p>
+
 <ol>
-<li>LLMの出力をパースする — <code>tool_call</code> が返ったかどうかを判定</li>
-<li><code>tool_call</code> があれば → ツールを実行 → 結果をメッセージに追加 → LLMに再度投げる</li>
-<li><code>tool_call</code> がなければ → 最終回答として終了</li>
+  <li>LLMの出力をパースする — <code class="language-plaintext highlighter-rouge">tool_call</code> が返ったかどうかを判定</li>
+  <li><code class="language-plaintext highlighter-rouge">tool_call</code> があれば → ツールを実行 → 結果をメッセージに追加 → LLMに再度投げる</li>
+  <li><code class="language-plaintext highlighter-rouge">tool_call</code> がなければ → 最終回答として終了</li>
 </ol>
-<pre><code class="language-text">[LLM呼び出し]
+
+<div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[LLM呼び出し]
      │
      ├─ tool_call あり → [ツール実行] → [結果追加] → [LLM呼び出し] に戻る
      │
      └─ tool_call なし → [終了・回答返却]
-</code></pre>
+</code></pre></div></div>
+
 <p>この分岐ロジックはPythonコード（LangGraphではconditional edge）であり、<strong>LLMの「気分」に左右されません</strong>。</p>
+
 <hr />
-<h2>4. 制御の境界線 — 誰が何を制御しているか</h2>
+
+<h2 id="4-制御の境界線--誰が何を制御しているか">4. 制御の境界線 — 誰が何を制御しているか</h2>
+
 <table>
-<thead>
-<tr>
-<th>側面</th>
-<th>誰が制御？</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>サイクルの<strong>構造</strong>（ループ・分岐）</td>
-<td>フレームワーク（コード）</td>
-</tr>
-<tr>
-<td>サイクルの<strong>中身</strong>（何を考え、何を呼ぶか）</td>
-<td>LLM</td>
-</tr>
-<tr>
-<td>終了条件の<strong>判定ロジック</strong></td>
-<td>フレームワーク（tool_callの有無）</td>
-</tr>
-<tr>
-<td>終了の<strong>意思決定</strong></td>
-<td>LLM（tool_callを出すか出さないか）</td>
-</tr>
-</tbody>
+  <thead>
+    <tr>
+      <th>側面</th>
+      <th>誰が制御？</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>サイクルの<strong>構造</strong>（ループ・分岐）</td>
+      <td>フレームワーク（コード）</td>
+    </tr>
+    <tr>
+      <td>サイクルの<strong>中身</strong>（何を考え、何を呼ぶか）</td>
+      <td>LLM</td>
+    </tr>
+    <tr>
+      <td>終了条件の<strong>判定ロジック</strong></td>
+      <td>フレームワーク（tool_callの有無）</td>
+    </tr>
+    <tr>
+      <td>終了の<strong>意思決定</strong></td>
+      <td>LLM（tool_callを出すか出さないか）</td>
+    </tr>
+  </tbody>
 </table>
+
 <p>LLMに任されている部分：</p>
+
 <ul>
-<li><strong>いつツールを呼ぶか</strong>（どのタイミングでAction）</li>
-<li><strong>どのツールをどの引数で呼ぶか</strong></li>
-<li><strong>いつ終了するか</strong>（tool_callを出さない ＝ 終了の意思表示）</li>
-<li><strong>Thoughtの質</strong>（推論の正確さ）</li>
+  <li><strong>いつツールを呼ぶか</strong>（どのタイミングでAction）</li>
+  <li><strong>どのツールをどの引数で呼ぶか</strong></li>
+  <li><strong>いつ終了するか</strong>（tool_callを出さない ＝ 終了の意思表示）</li>
+  <li><strong>Thoughtの質</strong>（推論の正確さ）</li>
 </ul>
+
 <hr />
-<h2>5. 原初と現代の比較まとめ</h2>
+
+<h2 id="5-原初と現代の比較まとめ">5. 原初と現代の比較まとめ</h2>
+
 <table>
-<thead>
-<tr>
-<th>観点</th>
-<th>原初のReAct</th>
-<th>現代（LangChain/LangGraph等）</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>LLMの出力形式</td>
-<td>自由テキスト <code>Action: Search[X]</code></td>
-<td>構造化された <code>tool_call</code> JSON</td>
-</tr>
-<tr>
-<td>パース方法</td>
-<td>正規表現（壊れやすい）</td>
-<td>APIレベルで構造化（堅牢）</td>
-</tr>
-<tr>
-<td>ループ制御</td>
-<td>素朴なwhileループ</td>
-<td>グラフ構造（LangGraph）</td>
-</tr>
-<tr>
-<td>ツール実行</td>
-<td>外部コードが実行</td>
-<td>外部コードが実行（同じ）</td>
-</tr>
-<tr>
-<td>フォーマット遵守</td>
-<td>LLMの模倣能力に依存</td>
-<td>APIが構造を保証</td>
-</tr>
-</tbody>
+  <thead>
+    <tr>
+      <th>観点</th>
+      <th>原初のReAct</th>
+      <th>現代（LangChain/LangGraph等）</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>LLMの出力形式</td>
+      <td>自由テキスト <code class="language-plaintext highlighter-rouge">Action: Search[X]</code></td>
+      <td>構造化された <code class="language-plaintext highlighter-rouge">tool_call</code> JSON</td>
+    </tr>
+    <tr>
+      <td>パース方法</td>
+      <td>正規表現（壊れやすい）</td>
+      <td>APIレベルで構造化（堅牢）</td>
+    </tr>
+    <tr>
+      <td>ループ制御</td>
+      <td>素朴なwhileループ</td>
+      <td>グラフ構造（LangGraph）</td>
+    </tr>
+    <tr>
+      <td>ツール実行</td>
+      <td>外部コードが実行</td>
+      <td>外部コードが実行（同じ）</td>
+    </tr>
+    <tr>
+      <td>フォーマット遵守</td>
+      <td>LLMの模倣能力に依存</td>
+      <td>APIが構造を保証</td>
+    </tr>
+  </tbody>
 </table>
+
 <hr />
-<h2>6. 結論</h2>
+
+<h2 id="6-結論">6. 結論</h2>
+
 <p>「ReActはプロンプトだけで実現している」は初期の素朴な実装には部分的に当てはまりますが、本質的には<strong>プロンプト（LLMの判断）＋ コード（構造的強制）のハイブリッド</strong>です。</p>
+
 <p>原初のReActにも外部の制御コードは存在しており、LLMは常に「テキストを出力するだけ」の存在でした。現代のフレームワークでは、構造化tool_callとグラフベースのルーティングにより、LLMに「サイクルを守れ」と祈る必要はなくなり、<strong>コードが構造を保証する</strong>設計に進化しています。</p>
+
 <hr />
-<h2>参考</h2>
+
+<h2 id="参考">参考</h2>
+
 <ul>
-<li>Yao, S. et al. (2022). <em>ReAct: Synergizing Reasoning and Acting in Language Models</em></li>
-<li><a href="https://python.langchain.com/">LangChain Documentation</a></li>
-<li><a href="https://langchain-ai.github.io/langgraph/">LangGraph Documentation</a></li>
-<li><a href="https://platform.openai.com/docs/guides/function-calling">OpenAI Function Calling</a></li>
-<li><a href="https://docs.anthropic.com/en/docs/build-with-claude/tool-use/overview">Anthropic Tool Use</a></li>
+  <li>Yao, S. et al. (2022). <em>ReAct: Synergizing Reasoning and Acting in Language Models</em></li>
+  <li><a href="https://python.langchain.com/">LangChain Documentation</a></li>
+  <li><a href="https://langchain-ai.github.io/langgraph/">LangGraph Documentation</a></li>
+  <li><a href="https://platform.openai.com/docs/guides/function-calling">OpenAI Function Calling</a></li>
+  <li><a href="https://docs.anthropic.com/en/docs/build-with-claude/tool-use/overview">Anthropic Tool Use</a></li>
 </ul>
-  <footer class="postNav clearfix"><a class="next" href="/blog/blog/mcp-stdio-sse-dataflow/"><span>MCPの仕組みを理解する&nbsp;&raquo;</span></a></footer>
+
+
+  <!-- POST NAVIGATION -->
+  <footer class="postNav clearfix"><a class="prev" href="/blog/blog/Backpropagation/"><span>&laquo;&nbsp;深層学習・誤差逆伝播法</span></a><a class="next" href="/blog/blog/mcp-stdio-sse-dataflow/"><span>MCPの仕組みを理解する：SSE・Stdio通信からLLMとのデータフローまで&nbsp;&raquo;</span></a></footer>
 </article>
       </div>
    </div><!-- end .content --><div class="footer">
 	<div class="container">
-		<p class="copy">&copy; 2026 Powered by <a href="http://jekyllrb.com">Jekyll</a></p>
+		<p class="copy">
+			&copy; 2026
+			<a href="http://brianmaierjr.com">Brian Maier Jr.</a> Powered by
+			<a href="http://jekyllrb.com">Jekyll</a>
+		</p>
+
+		<div class="footer-links">
+			<ul class="noList"><li>
+	<a href="https://www.facebook.com/brianmaierjr" target="_blank">
+		<svg
+			id="facebook-square"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path
+				class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.5)"
+				d="M82.667,1H17.335C8.351,1,1,8.351,1,17.336v65.329c0,8.99,7.351,16.335,16.334,16.335h65.332 C91.652,99.001,99,91.655,99,82.665V17.337C99,8.353,91.652,1.001,82.667,1L82.667,1z M84.318,50H68.375v42.875H50V50h-8.855V35.973 H50v-9.11c0-12.378,5.339-19.739,19.894-19.739h16.772V22.3H72.967c-4.066-0.007-4.57,2.12-4.57,6.078l-0.023,7.594H86.75 l-2.431,14.027V50z"
+			></path>
+		</svg>
+	</a>
+</li>
+<li>
+	<a href="https://twitter.com/brianmaierjr" target="_blank">
+		<svg
+			id="twitter"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path
+				class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.5)"
+				d="M99.001,19.428c-3.606,1.608-7.48,2.695-11.547,3.184c4.15-2.503,7.338-6.466,8.841-11.189 c-3.885,2.318-8.187,4-12.768,4.908c-3.667-3.931-8.893-6.387-14.676-6.387c-11.104,0-20.107,9.054-20.107,20.223 c0,1.585,0.177,3.128,0.52,4.609c-16.71-0.845-31.525-8.895-41.442-21.131C6.092,16.633,5.1,20.107,5.1,23.813 c0,7.017,3.55,13.208,8.945,16.834c-3.296-0.104-6.397-1.014-9.106-2.529c-0.002,0.085-0.002,0.17-0.002,0.255 c0,9.799,6.931,17.972,16.129,19.831c-1.688,0.463-3.463,0.71-5.297,0.71c-1.296,0-2.555-0.127-3.783-0.363 c2.559,8.034,9.984,13.882,18.782,14.045c-6.881,5.424-15.551,8.657-24.971,8.657c-1.623,0-3.223-0.096-4.796-0.282 c8.898,5.738,19.467,9.087,30.82,9.087c36.982,0,57.206-30.817,57.206-57.543c0-0.877-0.02-1.748-0.059-2.617 C92.896,27.045,96.305,23.482,99.001,19.428z"
+			></path>
+		</svg>
+	</a>
+</li>
+<li>
+	<a href="https://www.linkedin.com/in/brianmaierjr" target="_blank">
+	<svg
+		id="linkedin"
+		xmlns="http://www.w3.org/2000/svg"
+		width="96"
+		height="96"
+		viewBox="0 0 96 96"
+	>
+		<g fill="none">
+			<circle
+				class="outer-shape"
+				cx="48"
+				cy="48"
+				r="48"
+				fill="#000"
+			/>
+			<path
+				class="inner-shape"
+				fill="#FFF"
+				d="M10.2966071,46 L0.759821429,46 L0.759821429,15.2881537 L10.2966071,15.2881537 L10.2966071,46 Z M5.52308036,11.0987745 C2.47352679,11.0987745 1.17239551e-12,8.57282522 1.17239551e-12,5.52320357 C1.17239551e-12,2.47282245 2.47276734,-9.65449942e-13 5.52308036,-9.65449942e-13 C8.57339338,-9.65449942e-13 11.0461607,2.47282245 11.0461607,5.52320357 C11.0461607,8.57282522 8.57160714,11.0987745 5.52308036,11.0987745 Z M45.9897321,46 L36.4734821,46 L36.4734821,31.0496663 C36.4734821,27.4866403 36.4016071,22.9173419 31.5151339,22.9173419 C26.5567857,22.9173419 25.7969643,26.7884104 25.7969643,30.7929641 L25.7969643,46 L16.2704464,46 L16.2704464,15.2881537 L25.4170536,15.2881537 L25.4170536,19.4775329 L25.5505357,19.4775329 C26.82375,17.0645326 29.9338839,14.5180472 34.5739286,14.5180472 C44.2257143,14.5180472 46,20.8739927 46,29.1295341 L46,46 L45.9897321,46 Z"
+				transform="translate(25 25)"
+			/>
+		</g>
+	</svg>
+</a>
+</li>
+<li>
+	<a href="https://github.com/brianmaierjr" target="_blank">
+		<svg
+			id="github"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path
+				class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.5)"
+				d="M50,1C22.938,1,1,22.938,1,50s21.938,49,49,49s49-21.938,49-49S77.062,1,50,1z M79.099,79.099 c-3.782,3.782-8.184,6.75-13.083,8.823c-1.245,0.526-2.509,0.989-3.79,1.387v-7.344c0-3.86-1.324-6.699-3.972-8.517 c1.659-0.16,3.182-0.383,4.57-0.67c1.388-0.287,2.855-0.702,4.402-1.245c1.547-0.543,2.935-1.189,4.163-1.938 c1.228-0.75,2.409-1.723,3.541-2.919s2.082-2.552,2.847-4.067s1.372-3.334,1.818-5.455c0.446-2.121,0.67-4.458,0.67-7.01 c0-4.945-1.611-9.155-4.833-12.633c1.467-3.828,1.308-7.991-0.478-12.489l-1.197-0.143c-0.829-0.096-2.321,0.255-4.474,1.053 c-2.153,0.798-4.57,2.105-7.249,3.924c-3.797-1.053-7.736-1.579-11.82-1.579c-4.115,0-8.039,0.526-11.772,1.579 c-1.69-1.149-3.294-2.097-4.809-2.847c-1.515-0.75-2.727-1.26-3.637-1.532c-0.909-0.271-1.754-0.439-2.536-0.503 c-0.782-0.064-1.284-0.079-1.507-0.048c-0.223,0.031-0.383,0.064-0.478,0.096c-1.787,4.53-1.946,8.694-0.478,12.489 c-3.222,3.477-4.833,7.688-4.833,12.633c0,2.552,0.223,4.889,0.67,7.01c0.447,2.121,1.053,3.94,1.818,5.455 c0.765,1.515,1.715,2.871,2.847,4.067s2.313,2.169,3.541,2.919c1.228,0.751,2.616,1.396,4.163,1.938 c1.547,0.543,3.014,0.957,4.402,1.245c1.388,0.287,2.911,0.511,4.57,0.67c-2.616,1.787-3.924,4.626-3.924,8.517v7.487 c-1.445-0.43-2.869-0.938-4.268-1.53c-4.899-2.073-9.301-5.041-13.083-8.823c-3.782-3.782-6.75-8.184-8.823-13.083 C9.934,60.948,8.847,55.56,8.847,50s1.087-10.948,3.231-16.016c2.073-4.899,5.041-9.301,8.823-13.083s8.184-6.75,13.083-8.823 C39.052,9.934,44.44,8.847,50,8.847s10.948,1.087,16.016,3.231c4.9,2.073,9.301,5.041,13.083,8.823 c3.782,3.782,6.75,8.184,8.823,13.083c2.143,5.069,3.23,10.457,3.23,16.016s-1.087,10.948-3.231,16.016 C85.848,70.915,82.88,75.317,79.099,79.099L79.099,79.099z"
+			></path>
+		</svg>
+	</a>
+</li>
+<li>
+	<a href="https://i-am-a-fish.tumblr.com/" target="_blank">
+		<svg
+			id="tumblr"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.18)"
+				d="M210.857,197.545c-1.616-0.872-3.584-0.787-5.119,0.223c-11.62,7.638-23.4,11.511-35.016,11.511 c-6.242,0-11.605-1.394-16.416-4.275c-3.27-1.936-6.308-5.321-7.397-8.263c-1.057-2.797-1.045-10.327-1.029-20.748l0.005-63.543 h52.795c2.762,0,5-2.239,5-5V62.802c0-2.761-2.238-5-5-5h-52.795V5c0-2.761-2.238-5-5-5h-35.566c-2.528,0-4.658,1.887-4.964,4.397 c-1.486,12.229-4.258,22.383-8.247,30.196c-3.89,7.7-9.153,14.401-15.651,19.925c-5.206,4.44-14.118,8.736-26.49,12.769 c-2.058,0.671-3.45,2.589-3.45,4.754v35.41c0,2.761,2.238,5,5,5h28.953v82.666c0,12.181,1.292,21.347,3.952,28.026 c2.71,6.785,7.521,13.174,14.303,18.993c6.671,5.716,14.79,10.187,24.158,13.298c9.082,2.962,16.315,4.567,28.511,4.567 c10.31,0,20.137-1.069,29.213-3.179c8.921-2.082,19.017-5.761,30.008-10.934c1.753-0.825,2.871-2.587,2.871-4.524v-39.417 C213.484,200.108,212.476,198.418,210.857,197.545z"></path>
+		</svg>
+	</a>
+</li>
+<li>
+	<a href="https://www.youtube.com/@RickAstleyYT" target="_blank">
+		<svg
+			id="youtube"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path fill="#FFF" fill-rule="evenodd" clip-rule="evenodd"
+				d="M18.168 19.0028C20.4724 19.0867 22.41 17.29 22.5 14.9858V9.01982C22.41 6.71569 20.4724 4.91893 18.168 5.00282H6.832C4.52763 4.91893 2.58998 6.71569 2.5 9.01982V14.9858C2.58998 17.29 4.52763 19.0867 6.832 19.0028H18.168Z"
+				stroke="#000000" stroke-width="0"
+				stroke-linecap="round" stroke-linejoin="round"
+				transform="translate(22,22) scale(2.3)"></path>
+			<path class="outer-shape" fill-rule="evenodd" clip-rule="evenodd"
+				d="M12.008 9.17784L15.169 11.3258C15.3738 11.4454 15.4997 11.6647 15.4997 11.9018C15.4997 12.139 15.3738 12.3583 15.169 12.4778L12.008 14.8278C11.408 15.2348 10.5 14.8878 10.5 14.2518V9.75184C10.5 9.11884 11.409 8.77084 12.008 9.17784Z"
+				stroke-linecap="round" stroke-linejoin="round"
+				transform="translate(22,22) scale(2.3)"></path>
+		</svg>
+	</a>
+</li>
+<li>
+	<a href="mailto:brimaidesigns@gmail.com" target="_blank">
+		<svg
+			id="mail"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path
+				class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.5)"
+				d="M50,1C22.938,1,1,22.938,1,50s21.938,49,49,49s49-21.938,49-49S77.062,1,50,1z M25.5,25.5h49 c0.874,0,1.723,0.188,2.502,0.542L50,57.544L22.998,26.041C23.777,25.687,24.626,25.499,25.5,25.5L25.5,25.5z M19.375,68.375v-36.75 c0-0.128,0.005-0.256,0.014-0.383l17.96,20.953L19.587,69.958C19.448,69.447,19.376,68.916,19.375,68.375L19.375,68.375z M74.5,74.5 h-49c-0.541,0-1.072-0.073-1.583-0.212l17.429-17.429L50,66.956l8.653-10.096l17.429,17.429C75.572,74.427,75.041,74.5,74.5,74.5 L74.5,74.5z M80.625,68.375c0,0.541-0.073,1.072-0.211,1.583L62.652,52.195l17.96-20.953c0.008,0.127,0.014,0.255,0.014,0.383 L80.625,68.375L80.625,68.375z"
+			></path>
+		</svg>
+	</a>
+</li>
+</ul>
+		</div>
 	</div>
 </div>
+<!-- end .footer -->
+<!-- Add jQuery and other scripts -->
+<script src="//ajax.googleapis.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
+<script>window.jQuery || document.write('<script src=/blog/assets/js/jquery-1.11.2.min.js><\/script>')</script>
+<script src="/blog/assets/js/dropcap.min.js"></script>
+<script src="/blog/assets/js/responsive-nav.min.js"></script>
+<script src="/blog/assets/js/scripts.js"></script>
 </body>
+
 </html>
