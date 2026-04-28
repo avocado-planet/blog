@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<!--[if lt IE 7]><html class="no-js lt-ie9 lt-ie8 lt-ie7"><![endif]-->
+<!--[if IE 7]><html class="no-js lt-ie9 lt-ie8" <![endif]-->
+<!--[if IE 8]><html class="no-js lt-ie9" <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js"> <!--<![endif]--><head>
+	<meta charset="utf-8" />
+	<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<meta name="description" content="ReAct Agentのサイクルは本当にプロンプトだけで実現しているのか？原初の実装から現代のフレームワークまで、その本質を解説します。" />
+	<title>ReAct Agentの本質を理解する — プロンプト芸か、構造的制御か？</title>
+	<link rel="icon" type="image/x-icon" href=""/>
+	<link rel="alternate" type="application/rss+xml" title="Long Haul" href="https://avocado-planet.github.io/blog/feed.xml" />
+	<link rel="stylesheet" href="/blog/assets/css/style.css" />
+	<link rel="canonical" href="https://avocado-planet.github.io/blog/blog/react-agent-deep-dive/" />
+</head>
+<body> <div class="header ">
+     <div class="container">
+         <h1 class="logo"><a href="/blog/">Long Haul</a></h1>
+         <nav class="nav-collapse">
+             <ul class="noList"><li class="elementfirst">
+                     <a href="/blog/index.html">Home</a>
+                 </li><li class="element">
+                     <a href="/blog/about">About</a>
+                 </li><li class="elementlast">
+                     <a href="/blog/contact">Contact</a>
+                 </li>
+             </ul>
+         </nav>
+     </div>
+ </div><!-- end .header -->
+<div class="content">
+      <div class="container">
+         <article class="post"><header>
+    <h1 class="postTitle">ReAct Agentの本質を理解する — プロンプト芸か、構造的制御か？</h1>
+    <p class="meta">April 19, 2026</p>
+  </header>
+  <h1>ReAct Agentの本質を理解する — プロンプト芸か、構造的制御か？</h1>
+<h2>はじめに</h2>
+<p>LLMベースのエージェント開発において「ReAct」は最も基本的なパターンの一つです。Thought（思考）→ Action（行動）→ Observation（観察）のサイクルを繰り返すことで、LLMが外部ツールを使いながら推論を進めます。</p>
+<p>しかし、ここで根本的な疑問が生じます：</p>
+<blockquote>
+<p><strong>このサイクルは、実質的にプロンプトの指示によるものなのか？ LLMが本当にサイクルを守るかは、LLMの判断任せなのか？</strong></p>
+</blockquote>
+<p>本記事では、この問いに対して「原初のReAct」と「現代のフレームワーク実装」の2つの視点から掘り下げます。</p>
+<hr />
+<h2>1. ReActの基本サイクル</h2>
+<p>ReActパターン（Yao et al., 2022）は以下のサイクルで構成されます：</p>
+<ol>
+<li><strong>Thought（思考）</strong> — 現状を分析し、次に何をすべきか考える</li>
+<li><strong>Action（行動）</strong> — ツールを呼び出す</li>
+<li><strong>Observation（観察）</strong> — ツールの実行結果を受け取る</li>
+<li><strong>1に戻る</strong> — 目的が達成されるまで繰り返す</li>
+</ol>
+<hr />
+<h2>2. 原初のReAct — プロンプト + 素朴なループ</h2>
+<h3>2.1 Few-shotによるフォーマット誘導</h3>
+<p>原論文のReActでは、LLMに対して<strong>few-shot（少数例提示）</strong>でフォーマットを学ばせていました。</p>
+<p>few-shotとは、プロンプトの中に「こう振る舞え」という完成例を数個入れる手法です。LLMは明示的なルール説明ではなく、<strong>例のパターンを模倣</strong>することで所望のフォーマットに従います。</p>
+<pre><code class="language-text">以下の例に従って、質問に答えてください。
+
+--- 例1 ---
+Question: コロラド造山運動の東側の地域の標高範囲は？
+Thought 1: コロラド造山運動について調べる必要がある。
+Action 1: Search[コロラド造山運動]
+Observation 1: コロラド造山運動は約3億年前に起きた造山運動で...
+Thought 2: 東側の地域について調べよう。
+Action 2: Search[High Plains 標高]
+Observation 2: High Plainsの標高は約1,800〜7,000フィート。
+Thought 3: 答えがわかった。
+Action 3: Finish[約1,800〜7,000フィート]
+
+--- 例2 ---
+(同様のパターンをもう1〜2個)
+
+--- 本番 ---
+Question: ユーザーの実際の質問
+Thought 1:
+</code></pre>
+<p>LLMはこのパターンを見て、「Thought → Action → Observation」の形式で出力すればいいと<strong>推測</strong>します。</p>
+<blockquote>
+<p><strong>補足：Few-shotの分類</strong>
+- <strong>zero-shot</strong> — 例なし。指示文だけ
+- <strong>one-shot</strong> — 例が1個
+- <strong>few-shot</strong> — 例が2〜5個</p>
+</blockquote>
+<h3>2.2 ツール実行は誰がやるのか？</h3>
+<p>ここが重要なポイントです。<strong>LLMはテキストを生成するだけ</strong>であり、実際にツールを実行する能力はありません。</p>
+<p>原初のReActにも<strong>制御コード（外部のPythonプログラム）は存在していました</strong>。</p>
+<pre><code class="language-python">prompt = few_shot_examples + question
+
+while True:
+    # 1. LLMに投げる（Thought + Action をテキストとして生成させる）
+    output = llm(prompt)
+
+    # 2. 出力をテキストとしてパースする（正規表現等）
+    action = parse_action(output)  # 例: &quot;Search[東京の人口]&quot;
+
+    if action.type == &quot;Finish&quot;:
+        return action.argument  # 最終回答
+
+    # 3. ツールを実際に実行する（Pythonコードがやる）
+    observation = execute_tool(action)  # Wikipedia APIを叩く等
+
+    # 4. 結果をプロンプトに追記して次のループへ
+    prompt += output + f&quot;\nObservation: {observation}\n&quot;
+</code></pre>
+<p>処理の流れを整理すると：</p>
+<ol>
+<li>LLMが <code>Action: Search[東京の人口]</code> という<strong>文字列を出力する</strong></li>
+<li>外部のPythonコードがその文字列を<strong>正規表現でパースする</strong></li>
+<li>Pythonコードが実際に<strong>Wikipedia APIを叩く</strong></li>
+<li>結果を <code>Observation: 東京の人口は...</code> としてプロンプトに<strong>テキスト連結する</strong></li>
+<li>その拡張されたプロンプトをLLMに<strong>再度投げる</strong></li>
+</ol>
+<p>つまり、「制御コードがない時代」は存在しません。LLMは常にテキストを生成するだけで、ツール実行は必ず外部コードが担います。</p>
+<hr />
+<h2>3. 現代のReAct — フレームワークによる構造的制御</h2>
+<h3>3.1 構造化 tool_call の登場</h3>
+<p>原初のReActには大きな弱点がありました。LLMの出力は自由テキストなので、正規表現でのパースが壊れやすいのです。</p>
+<p>この問題を解決したのが、<strong>LLMプロバイダー自身によるAPI仕様の構造化</strong>です。</p>
+<table>
+<thead>
+<tr>
+<th>プロバイダー</th>
+<th>API仕様</th>
+<th>導入時期</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>OpenAI</td>
+<td><code>tool_calls</code> フィールド</td>
+<td>2023年6月〜</td>
+</tr>
+<tr>
+<td>Anthropic（Claude）</td>
+<td><code>tool_use</code> content block</td>
+<td>2024年4月〜</td>
+</tr>
+<tr>
+<td>Google（Gemini）</td>
+<td><code>function_call</code> パート</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p><strong>以前（自由テキスト時代）：</strong></p>
+<pre><code class="language-text">LLMの出力: &quot;Thought: I need to search.\nAction: Search[東京の人口]&quot;
+→ 開発者が正規表現でパースする（壊れやすい）
+</code></pre>
+<p><strong>現在（API構造化）：</strong></p>
+<pre><code class="language-json">{
+  &quot;tool_calls&quot;: [
+    {
+      &quot;function&quot;: {
+        &quot;name&quot;: &quot;search&quot;,
+        &quot;arguments&quot;: &quot;{\&quot;query\&quot;: \&quot;東京の人口\&quot;}&quot;
+      }
+    }
+  ]
+}
+</code></pre>
+<p>これはLLMの出力テキストではなく、<strong>APIレスポンスの構造化フィールド</strong>です。正規表現でパースする必要がなく、LLMが「フォーマットを守るかどうか」の不確実性が排除されました。</p>
+<blockquote>
+<p><strong>この構造化はLangChainが標準化したのではなく、LLMプロバイダー（OpenAI、Anthropic、Google等）がAPI仕様として定義したもの</strong>です。LangChainはこれらプロバイダーごとの差異を統一的なインターフェースに抽象化しているだけです。</p>
+</blockquote>
+<pre><code class="language-text">OpenAI tool_calls ──┐
+Anthropic tool_use ──┼→ LangChain 統一 ToolCall → LangGraph のルーティング
+Gemini function_call ┘
+</code></pre>
+<h3>3.2 フレームワークがサイクルを強制する</h3>
+<p>LangChainの <code>create_react_agent</code> やLangGraphでは、<strong>フレームワークのコード（グラフのエッジ）がサイクルの構造を制御</strong>しています：</p>
+<ol>
+<li>LLMの出力をパースする — <code>tool_call</code> が返ったかどうかを判定</li>
+<li><code>tool_call</code> があれば → ツールを実行 → 結果をメッセージに追加 → LLMに再度投げる</li>
+<li><code>tool_call</code> がなければ → 最終回答として終了</li>
+</ol>
+<pre><code class="language-text">[LLM呼び出し]
+     │
+     ├─ tool_call あり → [ツール実行] → [結果追加] → [LLM呼び出し] に戻る
+     │
+     └─ tool_call なし → [終了・回答返却]
+</code></pre>
+<p>この分岐ロジックはPythonコード（LangGraphではconditional edge）であり、<strong>LLMの「気分」に左右されません</strong>。</p>
+<hr />
+<h2>4. 制御の境界線 — 誰が何を制御しているか</h2>
+<table>
+<thead>
+<tr>
+<th>側面</th>
+<th>誰が制御？</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>サイクルの<strong>構造</strong>（ループ・分岐）</td>
+<td>フレームワーク（コード）</td>
+</tr>
+<tr>
+<td>サイクルの<strong>中身</strong>（何を考え、何を呼ぶか）</td>
+<td>LLM</td>
+</tr>
+<tr>
+<td>終了条件の<strong>判定ロジック</strong></td>
+<td>フレームワーク（tool_callの有無）</td>
+</tr>
+<tr>
+<td>終了の<strong>意思決定</strong></td>
+<td>LLM（tool_callを出すか出さないか）</td>
+</tr>
+</tbody>
+</table>
+<p>LLMに任されている部分：</p>
+<ul>
+<li><strong>いつツールを呼ぶか</strong>（どのタイミングでAction）</li>
+<li><strong>どのツールをどの引数で呼ぶか</strong></li>
+<li><strong>いつ終了するか</strong>（tool_callを出さない ＝ 終了の意思表示）</li>
+<li><strong>Thoughtの質</strong>（推論の正確さ）</li>
+</ul>
+<hr />
+<h2>5. 原初と現代の比較まとめ</h2>
+<table>
+<thead>
+<tr>
+<th>観点</th>
+<th>原初のReAct</th>
+<th>現代（LangChain/LangGraph等）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LLMの出力形式</td>
+<td>自由テキスト <code>Action: Search[X]</code></td>
+<td>構造化された <code>tool_call</code> JSON</td>
+</tr>
+<tr>
+<td>パース方法</td>
+<td>正規表現（壊れやすい）</td>
+<td>APIレベルで構造化（堅牢）</td>
+</tr>
+<tr>
+<td>ループ制御</td>
+<td>素朴なwhileループ</td>
+<td>グラフ構造（LangGraph）</td>
+</tr>
+<tr>
+<td>ツール実行</td>
+<td>外部コードが実行</td>
+<td>外部コードが実行（同じ）</td>
+</tr>
+<tr>
+<td>フォーマット遵守</td>
+<td>LLMの模倣能力に依存</td>
+<td>APIが構造を保証</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>6. 結論</h2>
+<p>「ReActはプロンプトだけで実現している」は初期の素朴な実装には部分的に当てはまりますが、本質的には<strong>プロンプト（LLMの判断）＋ コード（構造的強制）のハイブリッド</strong>です。</p>
+<p>原初のReActにも外部の制御コードは存在しており、LLMは常に「テキストを出力するだけ」の存在でした。現代のフレームワークでは、構造化tool_callとグラフベースのルーティングにより、LLMに「サイクルを守れ」と祈る必要はなくなり、<strong>コードが構造を保証する</strong>設計に進化しています。</p>
+<hr />
+<h2>参考</h2>
+<ul>
+<li>Yao, S. et al. (2022). <em>ReAct: Synergizing Reasoning and Acting in Language Models</em></li>
+<li><a href="https://python.langchain.com/">LangChain Documentation</a></li>
+<li><a href="https://langchain-ai.github.io/langgraph/">LangGraph Documentation</a></li>
+<li><a href="https://platform.openai.com/docs/guides/function-calling">OpenAI Function Calling</a></li>
+<li><a href="https://docs.anthropic.com/en/docs/build-with-claude/tool-use/overview">Anthropic Tool Use</a></li>
+</ul>
+  <footer class="postNav clearfix"><a class="next" href="/blog/blog/mcp-stdio-sse-dataflow/"><span>MCPの仕組みを理解する&nbsp;&raquo;</span></a></footer>
+</article>
+      </div>
+   </div><!-- end .content --><div class="footer">
+	<div class="container">
+		<p class="copy">&copy; 2026 Powered by <a href="http://jekyllrb.com">Jekyll</a></p>
+	</div>
+</div>
+</body>
+</html>

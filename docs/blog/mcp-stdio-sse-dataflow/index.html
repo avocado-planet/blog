@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<!--[if lt IE 7]><html class="no-js lt-ie9 lt-ie8 lt-ie7"><![endif]-->
+<!--[if IE 7]><html class="no-js lt-ie9 lt-ie8" <![endif]-->
+<!--[if IE 8]><html class="no-js lt-ie9" <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js"> <!--<![endif]--><head>
+	<meta charset="utf-8" />
+	<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<meta name="description" content="MCPサーバーの通信方式（SSE・Stdio）、LLMとのデータのやり取り、プロセス管理の仕組みを整理する" />
+	<title>MCPの仕組みを理解する：SSE・Stdio通信からLLMとのデータフローまで</title>
+	<link rel="icon" type="image/x-icon" href=""/>
+	<link rel="alternate" type="application/rss+xml" title="Long Haul" href="https://avocado-planet.github.io/blog/feed.xml" />
+	<link rel="stylesheet" href="/blog/assets/css/style.css" />
+	<link rel="canonical" href="https://avocado-planet.github.io/blog/blog/mcp-stdio-sse-dataflow/" />
+</head>
+<body> <div class="header ">
+     <div class="container">
+         <h1 class="logo"><a href="/blog/">Long Haul</a></h1>
+         <nav class="nav-collapse">
+             <ul class="noList"><li class="elementfirst">
+                     <a href="/blog/index.html">Home</a>
+                 </li><li class="element">
+                     <a href="/blog/about">About</a>
+                 </li><li class="elementlast">
+                     <a href="/blog/contact">Contact</a>
+                 </li>
+             </ul>
+         </nav>
+     </div>
+ </div><!-- end .header -->
+<div class="content">
+      <div class="container">
+         <article class="post"><header>
+    <h1 class="postTitle">MCPの仕組みを理解する：SSE・Stdio通信からLLMとのデータフローまで</h1>
+    <p class="meta">April 28, 2026</p>
+  </header>
+  <h2>MCPとは</h2>
+<p>MCP（Model Context Protocol）は、LLMエージェントが外部ツール（関数・APIなど）を呼び出すための通信プロトコルです。LangChainやClaude Desktopなどのクライアントが、MCPサーバーに接続してツールを取得・実行します。</p>
+<hr />
+<h2>通信方式：SSEとStdio</h2>
+<p>MCPには主に2つのトランスポートモードがあります。</p>
+<h3>SSE（Server-Sent Events）</h3>
+<p>HTTPベースの通信方式。クライアントが1回だけ接続すると、サーバーが好きなタイミングで何度もデータを送り続けられます。</p>
+<pre><code class="language-python"># SSEモードで起動
+mcp.run(transport=&quot;sse&quot;)
+
+# または uvicorn で細かく制御
+uvicorn.run(mcp.sse_app(), host=&quot;0.0.0.0&quot;, port=8001)
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>通信手段</td>
+<td>HTTP（<code>text/event-stream</code>）</td>
+</tr>
+<tr>
+<td>接続</td>
+<td>1回のリクエストで維持</td>
+</tr>
+<tr>
+<td>用途</td>
+<td>ネットワーク越しの接続、Colab環境</td>
+</tr>
+</tbody>
+</table>
+<p><code>mcp.run()</code> はMCPが内部でuvicornを起動するシンプルな方法。<code>uvicorn.run(mcp.sse_app())</code> はホスト・ポートを自由に指定でき、既存のFastAPIアプリへの組み込みも可能です。</p>
+<p>Google Colabでは <code>stdio</code> モードが <code>sys.stdin.fileno()</code> エラーを起こすため、SSEモードが回避策として使われます。</p>
+<hr />
+<h3>Stdio（標準入出力）</h3>
+<p>OSのパイプ機能でプロセスを直結する方式。HTTPを一切使いません。</p>
+<pre><code class="language-python">math_proc = subprocess.Popen(
+    [&quot;python&quot;, &quot;/tmp/math_server.py&quot;],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+)
+</code></pre>
+<p><code>subprocess.Popen</code> は起動したら即座に次の行へ進む（非同期）ため、サーバーを別プロセスで動かしながらクライアントコードを続けられます。</p>
+<p><strong>プロセス構造：OSのパイプで2プロセスを直結</strong></p>
+<p><svg width="100%" viewBox="0 0 680 220" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="arr1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+  <rect x="30" y="20" width="620" height="180" rx="16" fill="#f1efe8" stroke="#888780" stroke-width="0.5"/>
+  <text font-family="sans-serif" font-size="13" font-weight="500" x="340" y="46" text-anchor="middle" fill="#444441">OS（同一マシン）</text>
+  <rect x="60" y="66" width="190" height="70" rx="8" fill="#eeedfe" stroke="#534ab7" stroke-width="0.5"/>
+  <text font-family="sans-serif" font-size="13" font-weight="500" x="155" y="97" text-anchor="middle" fill="#3c3489">クライアント</text>
+  <text font-family="sans-serif" font-size="11" x="155" y="116" text-anchor="middle" fill="#534ab7">LangChain / Claude</text>
+  <rect x="430" y="66" width="190" height="70" rx="8" fill="#e1f5ee" stroke="#0f6e56" stroke-width="0.5"/>
+  <text font-family="sans-serif" font-size="13" font-weight="500" x="525" y="97" text-anchor="middle" fill="#085041">サーバー</text>
+  <text font-family="sans-serif" font-size="11" x="525" y="116" text-anchor="middle" fill="#0f6e56">math_server.py</text>
+  <line x1="252" y1="92" x2="428" y2="92" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#arr1)"/>
+  <text font-family="sans-serif" font-size="11" x="340" y="85" text-anchor="middle" fill="#085041">stdin（書き込み）</text>
+  <line x1="428" y1="112" x2="252" y2="112" stroke="#534ab7" stroke-width="1.5" marker-end="url(#arr1)"/>
+  <text font-family="sans-serif" font-size="11" x="340" y="130" text-anchor="middle" fill="#3c3489">stdout（読み取り）</text>
+  <rect x="60" y="155" width="560" height="32" rx="6" fill="#ffffff" stroke="#b4b2a9" stroke-width="0.5"/>
+  <text font-family="monospace" font-size="11" x="340" y="175" text-anchor="middle" fill="#444441">subprocess.Popen(["python", "math_server.py"], stdout=PIPE, stderr=PIPE)</text>
+</svg></p>
+<p>プロトコルは <strong>JSON-RPC 2.0</strong>。1行1メッセージ（改行区切り）でパイプを流れます。</p>
+<pre><code>クライアント → サーバーのstdinに書き込む
+サーバー     → stdoutに書き込む → クライアントが読む
+</code></pre>
+<p><strong>JSON-RPC通信の流れ（クライアント ↔ サーバー）</strong></p>
+<p><svg width="100%" viewBox="0 0 680 400" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="arr2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+  <rect x="30" y="20" width="130" height="44" rx="8" fill="#eeedfe" stroke="#534ab7" stroke-width="0.5"/>
+  <text font-family="sans-serif" font-size="13" font-weight="500" x="95" y="42" text-anchor="middle" fill="#3c3489">クライアント</text>
+  <rect x="520" y="20" width="130" height="44" rx="8" fill="#e1f5ee" stroke="#0f6e56" stroke-width="0.5"/>
+  <text font-family="sans-serif" font-size="13" font-weight="500" x="585" y="42" text-anchor="middle" fill="#085041">サーバー</text>
+  <line x1="95" y1="64" x2="95" y2="380" stroke="#b4b2a9" stroke-width="1.5"/>
+  <line x1="585" y1="64" x2="585" y2="380" stroke="#b4b2a9" stroke-width="1.5"/>
+  <line x1="97" y1="100" x2="583" y2="100" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <rect x="170" y="80" width="316" height="30" rx="6" fill="#eaf3de" stroke="#3b6d11" stroke-width="0.5"/>
+  <text font-family="monospace" font-size="11" x="328" y="99" text-anchor="middle" fill="#27500a">{"method":"initialize","id":1}</text>
+  <line x1="583" y1="148" x2="97" y2="148" stroke="#534ab7" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <rect x="170" y="128" width="316" height="30" rx="6" fill="#eeedfe" stroke="#534ab7" stroke-width="0.5"/>
+  <text font-family="monospace" font-size="11" x="328" y="147" text-anchor="middle" fill="#3c3489">{"result":{"capabilities":{...}},"id":1}</text>
+  <line x1="97" y1="196" x2="583" y2="196" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <rect x="196" y="176" width="264" height="30" rx="6" fill="#eaf3de" stroke="#3b6d11" stroke-width="0.5"/>
+  <text font-family="monospace" font-size="11" x="328" y="195" text-anchor="middle" fill="#27500a">{"method":"tools/list","id":2}</text>
+  <line x1="583" y1="244" x2="97" y2="244" stroke="#534ab7" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <rect x="148" y="224" width="364" height="30" rx="6" fill="#eeedfe" stroke="#534ab7" stroke-width="0.5"/>
+  <text font-family="monospace" font-size="11" x="328" y="243" text-anchor="middle" fill="#3c3489">{"result":{"tools":[{"name":"add",...}]},"id":2}</text>
+  <line x1="97" y1="292" x2="583" y2="292" stroke="#1D9E75" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <rect x="100" y="272" width="460" height="30" rx="6" fill="#eaf3de" stroke="#3b6d11" stroke-width="0.5"/>
+  <text font-family="monospace" font-size="11" x="328" y="291" text-anchor="middle" fill="#27500a">{"method":"tools/call","params":{"name":"add","arguments":{"a":3,"b":5}},"id":3}</text>
+  <line x1="583" y1="340" x2="97" y2="340" stroke="#534ab7" stroke-width="1.5" marker-end="url(#arr2)"/>
+  <rect x="170" y="320" width="316" height="30" rx="6" fill="#eeedfe" stroke="#534ab7" stroke-width="0.5"/>
+  <text font-family="monospace" font-size="11" x="328" y="339" text-anchor="middle" fill="#3c3489">{"result":{"content":[{"text":"8"}]},"id":3}</text>
+  <text font-family="sans-serif" font-size="11" x="30" y="104" fill="#639922">①</text>
+  <text font-family="sans-serif" font-size="11" x="30" y="152" fill="#534ab7">②</text>
+  <text font-family="sans-serif" font-size="11" x="30" y="200" fill="#639922">③</text>
+  <text font-family="sans-serif" font-size="11" x="30" y="248" fill="#534ab7">④</text>
+  <text font-family="sans-serif" font-size="11" x="30" y="296" fill="#639922">⑤</text>
+  <text font-family="sans-serif" font-size="11" x="30" y="344" fill="#534ab7">⑥</text>
+</svg></p>
+<p>通信の流れ：</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>方向</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>①</td>
+<td>→</td>
+<td><code>initialize</code>：接続確立の握手</td>
+</tr>
+<tr>
+<td>②</td>
+<td>←</td>
+<td><code>capabilities</code>：サーバーの機能を返す</td>
+</tr>
+<tr>
+<td>③</td>
+<td>→</td>
+<td><code>tools/list</code>：ツール一覧を要求</td>
+</tr>
+<tr>
+<td>④</td>
+<td>←</td>
+<td><code>tools</code>：<code>add</code>, <code>multiply</code> などのリスト</td>
+</tr>
+<tr>
+<td>⑤</td>
+<td>→</td>
+<td><code>tools/call</code>：ツールを引数付きで実行</td>
+</tr>
+<tr>
+<td>⑥</td>
+<td>←</td>
+<td><code>content</code>：実行結果を返す</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Stdio</th>
+<th>SSE</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>通信手段</td>
+<td>OSパイプ</td>
+<td>HTTP</td>
+</tr>
+<tr>
+<td>動作場所</td>
+<td>同一マシン限定</td>
+<td>ネットワーク越しも可</td>
+</tr>
+<tr>
+<td>速度</td>
+<td>速い</td>
+<td>やや遅い</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>LLMとMCP間のデータフロー</h2>
+<h3>ツール定義の取得</h3>
+<p>MCPクライアントが接続先サーバーに「どんなツールが使えるか？」を問い合わせるのが <code>get_tools()</code> です。サーバーはツールの名前・説明・引数の型をJSON形式で返します。これをLLMに渡すことで、LLMは「どのツールをどう使えるか」を把握できるようになります。</p>
+<p><code>get_tools()</code> はユーザーの入力を待たず、エージェント作成時に1回だけ実行されます。チャットが始まる前の「準備フェーズ」です。</p>
+<pre><code class="language-python"># 1. MCPサーバーへの接続設定
+client = MultiServerMCPClient({
+    &quot;math&quot;: {&quot;url&quot;: &quot;http://localhost:8000/sse&quot;, &quot;transport&quot;: &quot;sse&quot;}
+})
+
+# 2. サーバーに「使えるツール一覧をくれ」と問い合わせる
+tools = await client.get_tools()
+
+# 3. LLMとツール定義を組み合わせてエージェントを作る
+agent = create_agent(model, tools)
+
+# 4. ここで初めてユーザーのプロンプトを受け付ける
+result = await agent.ainvoke({&quot;messages&quot;: [...]})
+</code></pre>
+<p>LLMには以下のようなツール定義が渡ります。</p>
+<pre><code class="language-json">[
+  {
+    &quot;name&quot;: &quot;add&quot;,
+    &quot;description&quot;: &quot;2つの数を足す&quot;,
+    &quot;parameters&quot;: {
+      &quot;a&quot;: { &quot;type&quot;: &quot;number&quot; },
+      &quot;b&quot;: { &quot;type&quot;: &quot;number&quot; }
+    }
+  }
+]
+</code></pre>
+<h3><code>ainvoke()</code> 呼び出し時</h3>
+<p>ユーザーのプロンプトが入ると、LLMにはツール定義とプロンプトが<strong>同時に</strong>送られます。</p>
+<pre><code>┌─ システム情報 ───────────────────────────┐
+│ 使えるツール：add(a,b) / multiply(a,b)  │  ← get_tools()の結果
+└─────────────────────────────────────────┘
+┌─ ユーザーメッセージ ─────────────────────┐
+│ &quot;(3 + 5) x 12 を計算して&quot;               │  ← ainvoke()の引数
+└─────────────────────────────────────────┘
+</code></pre>
+<h3>ツール呼び出しの流れ</h3>
+<p><code>"(3 + 5) x 12 を計算して"</code> に対してLLMが行う判断サイクル：</p>
+<pre><code>Human      &quot;(3 + 5) x 12 を計算して&quot;
+AI         tool_call: add(a=3, b=5)
+Tool       &quot;8&quot;
+AI         tool_call: multiply(a=8, b=12)
+Tool       &quot;96&quot;
+AI         &quot;答えは 96 です&quot;   ← result['messages'][-1]
+</code></pre>
+<p>LLMが判断していること：</p>
+<table>
+<thead>
+<tr>
+<th>判断</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ツール選択</td>
+<td><code>add</code> と <code>multiply</code> のどちらを使うか</td>
+</tr>
+<tr>
+<td>引数の組み立て</td>
+<td>前のツール結果を次の引数に使う</td>
+</tr>
+<tr>
+<td>順序の決定</td>
+<td>足し算 → 掛け算の順番</td>
+</tr>
+<tr>
+<td>終了判断</td>
+<td>これ以上ツールは不要、回答を生成する</td>
+</tr>
+</tbody>
+</table>
+<p>この一連の判断サイクルが <strong>ReAct</strong>（Reasoning + Acting）の正体です。</p>
+<hr />
+<h2>プロセスのライフサイクル</h2>
+<p>LangChainとClaude.aiでMCPの寿命は異なります。</p>
+<h3>LangChain</h3>
+<pre><code class="language-python">client = MultiServerMCPClient({...})
+tools = await client.get_tools()   # ← ここで接続
+# ...
+# 関数が終わると client はGCに回収される → 接続切れ
+</code></pre>
+<p>ただし <code>subprocess.Popen</code> で起動したサーバープロセスは独立して動き続けます。明示的に <code>math_proc.terminate()</code> を呼ぶまで生存します。</p>
+<h3>claude.ai</h3>
+<p>セッション単位で接続が維持されます。タブを閉じる・セッション終了でMCP接続も切れます。MCPサーバー自体はアプリ終了まで生存するのが一般的な設計です。</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>MCP接続（クライアント側）</th>
+<th>MCPサーバープロセス</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LangChain</td>
+<td>関数の実行中のみ</td>
+<td><code>terminate()</code> するまで生存</td>
+</tr>
+<tr>
+<td>claude.ai</td>
+<td>セッション中は維持</td>
+<td>アプリ終了まで生存</td>
+</tr>
+</tbody>
+</table>
+<p>「接続」と「プロセス」は別物として管理する必要があります。</p>
+<hr />
+<h2>まとめ</h2>
+<ul>
+<li><strong>SSE</strong>：HTTPベース、ネットワーク越しに使える、Colab向き</li>
+<li><strong>Stdio</strong>：パイプベース、ローカル限定、高速、Claude Desktop向き</li>
+<li><strong>ツール定義</strong>はセッション開始時に1回取得してLLMに渡す</li>
+<li><strong>ReAct</strong>ループでLLMがツールを選択・実行・結果を次の引数に使う</li>
+<li><strong>プロセスと接続</strong>のライフサイクルは独立して管理する</li>
+</ul>
+  <footer class="postNav clearfix"><a class="prev" href="/blog/blog/react-agent-deep-dive/"><span>&laquo;&nbsp;ReAct Agentの本質を理解する</span></a></footer>
+</article>
+      </div>
+   </div><!-- end .content --><div class="footer">
+	<div class="container">
+		<p class="copy">&copy; 2026 Powered by <a href="http://jekyllrb.com">Jekyll</a></p>
+	</div>
+</div>
+</body>
+</html>
