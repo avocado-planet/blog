@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<!--[if lt IE 7]><html class="no-js lt-ie9 lt-ie8 lt-ie7"><![endif]-->
+<!--[if IE 7]><html class="no-js lt-ie9 lt-ie8" <![endif]-->
+<!--[if IE 8]><html class="no-js lt-ie9" <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js"> <!--<![endif]--><head>
+	<meta charset="utf-8" />
+	<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<meta name="description" content="" />
+	<title>ローカルでLLMを動かす方法まとめ：apfel、Ollama、LangChain連携</title>
+
+	<!-- Open Graph Meta -->
+	<meta content="Long Haul" property="og:site_name" /><meta content="ローカルでLLMを動かす方法まとめ：apfel、Ollama、LangChain連携" property="og:title" /><meta content="article" property="og:type" /><meta content="macOSのapfelやOllamaを使って、無料でローカルLLMを動かす方法とLangChainでの活用法を解説" property="og:description" /><meta content="https://avocado-planet.github.io/blog/blog/local-llm-guide/" property="og:url" /><meta
+		content="2026-04-29T00:00:00+00:00"
+		property="article:published_time"
+	/>
+	<meta content="https://avocado-planet.github.io/blog/about/" property="article:author" /><meta
+		content="https://avocado-planet.github.io/blog/assets/img/touring.jpg"
+		property="og:image"
+	/><!-- Twitter Cards -->
+	<meta name="twitter:card" content="summary" />
+	<meta name="twitter:site" content="@brianmaierjr" />
+	<meta name="twitter:creator" content="@brianmaierjr" /><meta name="twitter:title" content="ローカルでLLMを動かす方法まとめ：apfel、Ollama、LangChain連携" /><meta name="twitter:url" content="https://avocado-planet.github.io/blog/blog/local-llm-guide/" /><meta name="twitter:description" content="macOSのapfelやOllamaを使って、無料でローカルLLMを動かす方法とLangChainでの活用法を解説" /><meta
+		name="twitter:image:src"
+		content="https://avocado-planet.github.io/blog/assets/img/touring.jpg"
+	/><!-- Favicon -->
+	<link rel="icon" type="image/x-icon" href=""/>
+
+	<!-- Come and get me RSS readers -->
+	<link rel="alternate" type="application/rss+xml" title="Long Haul"
+	href="https://avocado-planet.github.io/blog/feed.xml" />
+
+	<!-- Stylesheet -->
+	<link rel="stylesheet" href="/blog/assets/css/style.css" />
+
+	<!-- Canonical URL -->
+	<link
+		rel="canonical"
+		href="https://avocado-planet.github.io/blog/blog/local-llm-guide/"
+	/><!-- Google Analytics: change UA-XXXXX-X to be your site's ID. -->
+<script>
+   (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+    (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+    m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+    })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+ga('create', 'UA-58263416-1', 'auto');
+ga('send', 'pageview');
+
+</script>
+</head>
+<body> <div class="header ">
+     <div class="container">
+         <h1 class="logo"><a href="/blog/">Long Haul</a></h1>
+         <nav class="nav-collapse">
+             <ul class="noList"><li class="elementfirst">
+                     <a href="/blog/index.html">Home</a>
+                 </li><li class="element">
+                     <a href="/blog/about">About</a>
+                 </li><li class="elementlast">
+                     <a href="/blog/contact">Contact</a>
+                 </li><li> <a href="https://github.com/brianmaierjr/long-haul" target="_blank">GitHub</a></li>
+                 <li><a href="https://github.com/brianmaierjr/long-haul/archive/master.zip">Download Theme</a></li>
+             </ul>
+         </nav>
+     </div>
+ </div><!-- end .header -->
+<div class="content">
+      <div class="container">
+         <article class="post"><header>
+    <h1 class="postTitle">ローカルでLLMを動かす方法まとめ：apfel、Ollama、LangChain連携</h1>
+    <p class="meta">April 29, 2026 | <span class="time">5</span> Minute Read</p>
+  </header>
+
+  <p>クラウドAPIを使わずに、自分のマシン上でLLMを動かす方法をまとめました。プライバシー重視、コスト削減、オフライン利用など、ローカルLLMには多くのメリットがあります。</p>
+
+<h2 id="ローカルllmの選択肢">ローカルLLMの選択肢</h2>
+
+<p>すべて<strong>無料・オープンソース</strong>で利用可能です。</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>方案</th>
+      <th>特徴</th>
+      <th>向いている用途</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>apfel</strong></td>
+      <td>macOS標準搭載モデルを利用、設定不要</td>
+      <td>プライバシー重視、軽量タスク</td>
+    </tr>
+    <tr>
+      <td><strong>Ollama</strong></td>
+      <td>一行コマンドでモデル管理、最も簡単</td>
+      <td>日常使い、開発</td>
+    </tr>
+    <tr>
+      <td><strong>LM Studio</strong></td>
+      <td>GUIで操作、視覚的にモデル選択</td>
+      <td>初心者、試行錯誤</td>
+    </tr>
+    <tr>
+      <td><strong>llama.cpp</strong></td>
+      <td>最軽量、C++直接実行</td>
+      <td>組み込み、最小依存</td>
+    </tr>
+    <tr>
+      <td><strong>vLLM</strong></td>
+      <td>高スループット、本番向け</td>
+      <td>高並発環境</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="apfelmacos標準のaiを解放する">apfel：macOS標準のAIを解放する</h2>
+
+<h3 id="apfelとは">apfelとは</h3>
+
+<p>macOS Tahoe（26）には、AppleのFoundation Model（約3Bパラメータ）が標準搭載されています。<strong>apfel</strong>は、このモデルをターミナルから使えるようにするオープンソースツールです。</p>
+
+<ul>
+  <li><strong>ダウンロード不要</strong> — モデルはすでにmacOSに入っている</li>
+  <li><strong>API キー不要</strong> — 完全オフライン動作</li>
+  <li><strong>設定不要</strong> — <code class="language-plaintext highlighter-rouge">brew install</code> して即使える</li>
+</ul>
+
+<h3 id="インストールと基本的な使い方">インストールと基本的な使い方</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>brew <span class="nb">install </span>apfel
+
+<span class="c"># 直接質問</span>
+apfel <span class="s2">"東京の人口は？"</span>
+
+<span class="c"># JSON出力</span>
+apfel <span class="nt">-o</span> json <span class="s2">"Appleを日本語に翻訳"</span> | jq .content
+</code></pre></div></div>
+
+<h3 id="3つのモード">3つのモード</h3>
+
+<p><strong>1. CLIツール</strong> — パイプ処理対応のUNIXツール</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">cat </span>document.txt | apfel <span class="s2">"要約して"</span>
+</code></pre></div></div>
+
+<p><strong>2. OpenAI互換サーバー</strong> — 既存のSDKがそのまま使える</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>apfel <span class="nt">--serve</span>
+<span class="c"># http://127.0.0.1:11434 で起動</span>
+</code></pre></div></div>
+
+<p><strong>3. インタラクティブチャット</strong> — マルチターン会話</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>apfel <span class="nt">--chat</span> <span class="nt">-s</span> <span class="s2">"あなたはコーディングアシスタントです"</span>
+</code></pre></div></div>
+
+<h3 id="モデルスペック">モデルスペック</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>項目</th>
+      <th>値</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>パラメータ</td>
+      <td>約 3B</td>
+    </tr>
+    <tr>
+      <td>コンテキスト</td>
+      <td>4,096 トークン</td>
+    </tr>
+    <tr>
+      <td>量子化</td>
+      <td>Mixed 2/4-bit</td>
+    </tr>
+    <tr>
+      <td>対応言語</td>
+      <td>英、独、西、仏、伊、日、韓、葡、中</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="プライバシー">プライバシー</h3>
+
+<ul>
+  <li>完全オンデバイス実行、ネットワーク通信なし</li>
+  <li>Apple もプロンプト/レスポンスを収集しない</li>
+  <li>テレメトリなし（<code class="language-plaintext highlighter-rouge">--update</code> 以外はネットワーク接続ゼロ）</li>
+</ul>
+
+<h3 id="制限事項">制限事項</h3>
+
+<ul>
+  <li>コンテキストが4,096トークンのみ（長い会話には不向き）</li>
+  <li>3Bモデルなので複雑な推論は苦手</li>
+  <li>得意：テキスト変換、分類、短い要約、翻訳</li>
+  <li>苦手：数学、複雑なコード生成</li>
+</ul>
+
+<h2 id="ollama本地llmのdocker">Ollama：本地LLMのDocker</h2>
+
+<h3 id="ollamaとは">Ollamaとは</h3>
+
+<p><strong>Ollama</strong>は、ローカルでLLMを動かすための管理ツールです。「本地LLMのDocker」と呼ばれるように、モデルのダウンロード・管理・実行をワンストップで提供します。</p>
+
+<h3 id="インストールと使い方">インストールと使い方</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># macOS</span>
+brew <span class="nb">install </span>ollama
+
+<span class="c"># モデルを取得して実行</span>
+ollama pull llama3.1
+ollama run llama3.1
+<span class="c"># そのまま対話開始</span>
+</code></pre></div></div>
+
+<h3 id="主な機能">主な機能</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>機能</th>
+      <th>説明</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>モデルライブラリ</td>
+      <td>Llama、Qwen、Gemma、Mistralなど主要モデルを <code class="language-plaintext highlighter-rouge">ollama pull</code> で取得</td>
+    </tr>
+    <tr>
+      <td>自動量子化</td>
+      <td>ハードウェアに応じた最適な量子化を自動選択</td>
+    </tr>
+    <tr>
+      <td>OpenAI互換API</td>
+      <td><code class="language-plaintext highlighter-rouge">localhost:11434</code> で OpenAI SDK 互換サービスを提供</td>
+    </tr>
+    <tr>
+      <td>Modelfile</td>
+      <td>Dockerfileのように、カスタムモデル設定を記述可能</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="なぜ人気か">なぜ人気か</h3>
+
+<ol>
+  <li><strong>ゼロ設定</strong> — GGUFの手動ダウンロードやGPUパラメータ設定が不要</li>
+  <li><strong>クロスプラットフォーム</strong> — macOS / Linux / Windows 対応</li>
+  <li><strong>豊富なエコシステム</strong> — LangChain、Open WebUI、Continueなどが公式対応</li>
+</ol>
+
+<h2 id="googleの最新オープンソースllmgemma-4">Googleの最新オープンソースLLM：Gemma 4</h2>
+
+<p>2026年4月にGoogleが公開した<strong>Gemma 4</strong>は、Apache 2.0ライセンスのオープンモデルです。</p>
+
+<h3 id="モデルサイズ">モデルサイズ</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>サイズ</th>
+      <th>用途</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>E2B, E4B</td>
+      <td>エッジ/モバイル（Raspberry Pi、Jetson Nano対応）</td>
+    </tr>
+    <tr>
+      <td>26B MoE</td>
+      <td>汎用（単一80GB GPUで動作）</td>
+    </tr>
+    <tr>
+      <td>31B Dense</td>
+      <td>高性能（Arenaランキング3位相当）</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="特徴">特徴</h3>
+
+<ul>
+  <li>Gemini 3技術ベース</li>
+  <li>Agentic AIワークフロー向けに最適化</li>
+  <li>LangChainで Ollama 経由で利用可能</li>
+</ul>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ollama pull gemma4:26b
+</code></pre></div></div>
+
+<h2 id="主要オープンソースllm比較">主要オープンソースLLM比較</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>モデル</th>
+      <th>提供元</th>
+      <th>強み</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Gemma 4</strong></td>
+      <td>Google</td>
+      <td>Apache 2.0、agentic最適化、全サイズ展開</td>
+    </tr>
+    <tr>
+      <td><strong>Qwen 3.5</strong></td>
+      <td>Alibaba</td>
+      <td>超長コンテキスト、マルチモーダル</td>
+    </tr>
+    <tr>
+      <td><strong>DeepSeek-V3.2</strong></td>
+      <td>DeepSeek</td>
+      <td>GPT-5級の推論能力</td>
+    </tr>
+    <tr>
+      <td><strong>Llama 3.1</strong></td>
+      <td>Meta</td>
+      <td>成熟したエコシステム</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="ローカルllmをapiとして公開する">ローカルLLMをAPIとして公開する</h2>
+
+<p>ローカルで動かしているLLMを、OpenAI互換のAPIサーバーとして公開できます。これにより、既存のOpenAI SDKやLangChainからそのまま利用可能になります。</p>
+
+<h3 id="apfelの場合">apfelの場合</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># サーバー起動</span>
+apfel <span class="nt">--serve</span>
+<span class="c"># http://127.0.0.1:11434 で OpenAI互換APIが起動</span>
+
+<span class="c"># 認証トークン付きで起動（セキュリティ強化）</span>
+apfel <span class="nt">--serve</span> <span class="nt">--token</span> <span class="s2">"your-secret-token"</span>
+</code></pre></div></div>
+
+<p>対応エンドポイント：</p>
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">POST /v1/chat/completions</code> — チャット補完</li>
+  <li><code class="language-plaintext highlighter-rouge">GET /v1/models</code> — モデル一覧</li>
+  <li>ストリーミング（SSE）、Tool Calling、<code class="language-plaintext highlighter-rouge">response_format: json_object</code> 対応</li>
+</ul>
+
+<h3 id="ollamaの場合">Ollamaの場合</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># Ollamaは起動時に自動でAPIサーバーが立ち上がる</span>
+ollama serve
+<span class="c"># http://localhost:11434 で起動</span>
+</code></pre></div></div>
+
+<p>Ollamaも OpenAI互換エンドポイントを提供：</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>curl http://localhost:11434/v1/chat/completions <span class="se">\</span>
+  <span class="nt">-H</span> <span class="s2">"Content-Type: application/json"</span> <span class="se">\</span>
+  <span class="nt">-d</span> <span class="s1">'{
+    "model": "llama3.1",
+    "messages": [{"role": "user", "content": "Hello"}]
+  }'</span>
+</code></pre></div></div>
+
+<h3 id="vllmの場合高スループット向け">vLLMの場合（高スループット向け）</h3>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># vLLMサーバー起動</span>
+vllm serve meta-llama/Llama-3.1-8B-Instruct
+
+<span class="c"># http://localhost:8000/v1 で OpenAI互換API</span>
+</code></pre></div></div>
+
+<h3 id="lm-studioの場合">LM Studioの場合</h3>
+
+<ol>
+  <li>LM Studioを起動</li>
+  <li>モデルをロード</li>
+  <li>左メニューから「Local Server」を選択</li>
+  <li>「Start Server」をクリック</li>
+  <li><code class="language-plaintext highlighter-rouge">http://localhost:1234/v1</code> でAPI利用可能</li>
+</ol>
+
+<h3 id="クライアントからの接続例">クライアントからの接続例</h3>
+
+<p>どのサーバーも OpenAI SDK でそのまま使えます：</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">openai</span> <span class="kn">import</span> <span class="n">OpenAI</span>
+
+<span class="c1"># apfel / Ollama
+</span><span class="n">client</span> <span class="o">=</span> <span class="n">OpenAI</span><span class="p">(</span>
+    <span class="n">base_url</span><span class="o">=</span><span class="s">"http://localhost:11434/v1"</span><span class="p">,</span>
+    <span class="n">api_key</span><span class="o">=</span><span class="s">"unused"</span><span class="p">,</span>  <span class="c1"># ローカルサーバーは認証不要の場合が多い
+</span><span class="p">)</span>
+
+<span class="c1"># vLLM
+</span><span class="n">client</span> <span class="o">=</span> <span class="n">OpenAI</span><span class="p">(</span>
+    <span class="n">base_url</span><span class="o">=</span><span class="s">"http://localhost:8000/v1"</span><span class="p">,</span>
+    <span class="n">api_key</span><span class="o">=</span><span class="s">"unused"</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="c1"># LM Studio
+</span><span class="n">client</span> <span class="o">=</span> <span class="n">OpenAI</span><span class="p">(</span>
+    <span class="n">base_url</span><span class="o">=</span><span class="s">"http://localhost:1234/v1"</span><span class="p">,</span>
+    <span class="n">api_key</span><span class="o">=</span><span class="s">"lm-studio"</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="p">.</span><span class="n">chat</span><span class="p">.</span><span class="n">completions</span><span class="p">.</span><span class="n">create</span><span class="p">(</span>
+    <span class="n">model</span><span class="o">=</span><span class="s">"llama3.1"</span><span class="p">,</span>  <span class="c1"># または apple-foundationmodel など
+</span>    <span class="n">messages</span><span class="o">=</span><span class="p">[{</span><span class="s">"role"</span><span class="p">:</span> <span class="s">"user"</span><span class="p">,</span> <span class="s">"content"</span><span class="p">:</span> <span class="s">"こんにちは"</span><span class="p">}],</span>
+<span class="p">)</span>
+<span class="k">print</span><span class="p">(</span><span class="n">response</span><span class="p">.</span><span class="n">choices</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="n">message</span><span class="p">.</span><span class="n">content</span><span class="p">)</span>
+</code></pre></div></div>
+
+<h3 id="外部公開する場合の注意">外部公開する場合の注意</h3>
+
+<p>ローカルネットワーク外に公開する場合は、セキュリティ対策が必要です：</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>対策</th>
+      <th>方法</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>認証</td>
+      <td><code class="language-plaintext highlighter-rouge">--token</code> オプションや reverse proxy での Basic認証</td>
+    </tr>
+    <tr>
+      <td>HTTPS</td>
+      <td>nginx や Caddy で SSL終端</td>
+    </tr>
+    <tr>
+      <td>ファイアウォール</td>
+      <td>特定IPのみ許可</td>
+    </tr>
+    <tr>
+      <td>レート制限</td>
+      <td>nginx の <code class="language-plaintext highlighter-rouge">limit_req</code> など</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># 例：apfelで認証トークンを設定</span>
+apfel <span class="nt">--serve</span> <span class="nt">--token</span> <span class="s2">"my-secret-api-key"</span>
+
+<span class="c"># クライアント側</span>
+client <span class="o">=</span> OpenAI<span class="o">(</span>
+    <span class="nv">base_url</span><span class="o">=</span><span class="s2">"http://your-server:11434/v1"</span>,
+    <span class="nv">api_key</span><span class="o">=</span><span class="s2">"my-secret-api-key"</span>,
+<span class="o">)</span>
+</code></pre></div></div>
+
+<h2 id="langchainでの活用">LangChainでの活用</h2>
+
+<h3 id="apfelをlangchainで使う">apfelをLangChainで使う</h3>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">langchain_openai</span> <span class="kn">import</span> <span class="n">ChatOpenAI</span>
+
+<span class="c1"># apfelサーバーを起動後
+# $ apfel --serve
+</span>
+<span class="n">llm</span> <span class="o">=</span> <span class="n">ChatOpenAI</span><span class="p">(</span>
+    <span class="n">base_url</span><span class="o">=</span><span class="s">"http://localhost:11434/v1"</span><span class="p">,</span>
+    <span class="n">api_key</span><span class="o">=</span><span class="s">"unused"</span><span class="p">,</span>  <span class="c1"># apfelは認証不要だが引数は必須
+</span>    <span class="n">model</span><span class="o">=</span><span class="s">"apple-foundationmodel"</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="n">response</span> <span class="o">=</span> <span class="n">llm</span><span class="p">.</span><span class="n">invoke</span><span class="p">(</span><span class="s">"こんにちは"</span><span class="p">)</span>
+<span class="k">print</span><span class="p">(</span><span class="n">response</span><span class="p">.</span><span class="n">content</span><span class="p">)</span>
+</code></pre></div></div>
+
+<h3 id="ollamaをlangchainで使う">OllamaをLangChainで使う</h3>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">langchain_ollama</span> <span class="kn">import</span> <span class="n">ChatOllama</span>
+
+<span class="n">llm</span> <span class="o">=</span> <span class="n">ChatOllama</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s">"llama3.1"</span><span class="p">)</span>
+<span class="n">response</span> <span class="o">=</span> <span class="n">llm</span><span class="p">.</span><span class="n">invoke</span><span class="p">(</span><span class="s">"Hello"</span><span class="p">)</span>
+</code></pre></div></div>
+
+<h3 id="tool-calling">Tool Calling</h3>
+
+<p>apfel、Ollamaともに Tool Calling に対応しています。</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">langchain_core.tools</span> <span class="kn">import</span> <span class="n">tool</span>
+
+<span class="o">@</span><span class="n">tool</span>
+<span class="k">def</span> <span class="nf">multiply</span><span class="p">(</span><span class="n">a</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">b</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="s">"""2つの数を掛け算する"""</span>
+    <span class="k">return</span> <span class="n">a</span> <span class="o">*</span> <span class="n">b</span>
+
+<span class="n">llm_with_tools</span> <span class="o">=</span> <span class="n">llm</span><span class="p">.</span><span class="n">bind_tools</span><span class="p">([</span><span class="n">multiply</span><span class="p">])</span>
+<span class="n">response</span> <span class="o">=</span> <span class="n">llm_with_tools</span><span class="p">.</span><span class="n">invoke</span><span class="p">(</span><span class="s">"15 × 27 は？"</span><span class="p">)</span>
+</code></pre></div></div>
+
+<h3 id="langgraphでのagent構築">LangGraphでのAgent構築</h3>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">langgraph.prebuilt</span> <span class="kn">import</span> <span class="n">create_react_agent</span>
+
+<span class="n">agent</span> <span class="o">=</span> <span class="n">create_react_agent</span><span class="p">(</span><span class="n">llm</span><span class="p">,</span> <span class="n">tools</span><span class="o">=</span><span class="p">[</span><span class="n">multiply</span><span class="p">])</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">agent</span><span class="p">.</span><span class="n">invoke</span><span class="p">({</span><span class="s">"messages"</span><span class="p">:</span> <span class="p">[(</span><span class="s">"user"</span><span class="p">,</span> <span class="s">"15と27を掛けて"</span><span class="p">)]})</span>
+</code></pre></div></div>
+
+<h2 id="コストについて">コストについて</h2>
+
+<p><strong>すべて無料です。</strong></p>
+
+<table>
+  <thead>
+    <tr>
+      <th>項目</th>
+      <th>コスト</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>ソフトウェア</td>
+      <td>すべてオープンソース、無料</td>
+    </tr>
+    <tr>
+      <td>モデル</td>
+      <td>オープンウェイト、無料</td>
+    </tr>
+    <tr>
+      <td>API料金</td>
+      <td>なし（ローカル実行）</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>唯一のコストは：</p>
+
+<ul>
+  <li><strong>ストレージ</strong> — モデルファイル（数GB〜数十GB）</li>
+  <li><strong>ハードウェア</strong> — メモリ/VRAMが多いほど大きなモデルが動く</li>
+</ul>
+
+<p>Apple Silicon Mac であれば、7B〜8Bモデルは快適に動作します。</p>
+
+<h2 id="用途別おすすめ">用途別おすすめ</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>シナリオ</th>
+      <th>おすすめ</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>手軽に始めたい</td>
+      <td><strong>Ollama</strong></td>
+    </tr>
+    <tr>
+      <td>GUIで試したい</td>
+      <td><strong>LM Studio</strong></td>
+    </tr>
+    <tr>
+      <td>macOSネイティブ・プライバシー重視</td>
+      <td><strong>apfel</strong></td>
+    </tr>
+    <tr>
+      <td>本番環境・高並発</td>
+      <td><strong>vLLM</strong></td>
+    </tr>
+    <tr>
+      <td>最小依存・組み込み</td>
+      <td><strong>llama.cpp</strong></td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Agent開発には <strong>Ollama + Llama 3.1 8B</strong> がバランス良くおすすめです。</p>
+
+<h2 id="まとめ">まとめ</h2>
+
+<p>ローカルLLMは、クラウドAPIに比べて以下のメリットがあります：</p>
+
+<ul>
+  <li><strong>プライバシー</strong> — データが外部に出ない</li>
+  <li><strong>コスト</strong> — API料金ゼロ</li>
+  <li><strong>オフライン</strong> — ネット接続不要で動作</li>
+  <li><strong>カスタマイズ</strong> — ファインチューニング可能</li>
+</ul>
+
+<p>apfelやOllamaを使えば、数分でローカルLLM環境が整います。LangChainとの連携も簡単なので、ぜひ試してみてください。</p>
+
+
+  <!-- POST NAVIGATION -->
+  <footer class="postNav clearfix"><a class="prev" href="/blog/blog/mcp-stdio-sse-dataflow/"><span>&laquo;&nbsp;MCPの仕組みを理解する：SSE・Stdio通信からLLMとのデータフローまで</span></a></footer>
+</article>
+      </div>
+   </div><!-- end .content --><div class="footer">
+	<div class="container">
+		<p class="copy">
+			&copy; 2026
+			<a href="http://brianmaierjr.com">Brian Maier Jr.</a> Powered by
+			<a href="http://jekyllrb.com">Jekyll</a>
+		</p>
+
+		<div class="footer-links">
+			<ul class="noList"><li>
+	<a href="https://www.facebook.com/brianmaierjr" target="_blank">
+		<svg
+			id="facebook-square"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path
+				class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.5)"
+				d="M82.667,1H17.335C8.351,1,1,8.351,1,17.336v65.329c0,8.99,7.351,16.335,16.334,16.335h65.332 C91.652,99.001,99,91.655,99,82.665V17.337C99,8.353,91.652,1.001,82.667,1L82.667,1z M84.318,50H68.375v42.875H50V50h-8.855V35.973 H50v-9.11c0-12.378,5.339-19.739,19.894-19.739h16.772V22.3H72.967c-4.066-0.007-4.57,2.12-4.57,6.078l-0.023,7.594H86.75 l-2.431,14.027V50z"
+			></path>
+		</svg>
+	</a>
+</li>
+<li>
+	<a href="https://twitter.com/brianmaierjr" target="_blank">
+		<svg
+			id="twitter"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path
+				class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.5)"
+				d="M99.001,19.428c-3.606,1.608-7.48,2.695-11.547,3.184c4.15-2.503,7.338-6.466,8.841-11.189 c-3.885,2.318-8.187,4-12.768,4.908c-3.667-3.931-8.893-6.387-14.676-6.387c-11.104,0-20.107,9.054-20.107,20.223 c0,1.585,0.177,3.128,0.52,4.609c-16.71-0.845-31.525-8.895-41.442-21.131C6.092,16.633,5.1,20.107,5.1,23.813 c0,7.017,3.55,13.208,8.945,16.834c-3.296-0.104-6.397-1.014-9.106-2.529c-0.002,0.085-0.002,0.17-0.002,0.255 c0,9.799,6.931,17.972,16.129,19.831c-1.688,0.463-3.463,0.71-5.297,0.71c-1.296,0-2.555-0.127-3.783-0.363 c2.559,8.034,9.984,13.882,18.782,14.045c-6.881,5.424-15.551,8.657-24.971,8.657c-1.623,0-3.223-0.096-4.796-0.282 c8.898,5.738,19.467,9.087,30.82,9.087c36.982,0,57.206-30.817,57.206-57.543c0-0.877-0.02-1.748-0.059-2.617 C92.896,27.045,96.305,23.482,99.001,19.428z"
+			></path>
+		</svg>
+	</a>
+</li>
+<li>
+	<a href="https://www.linkedin.com/in/brianmaierjr" target="_blank">
+	<svg
+		id="linkedin"
+		xmlns="http://www.w3.org/2000/svg"
+		width="96"
+		height="96"
+		viewBox="0 0 96 96"
+	>
+		<g fill="none">
+			<circle
+				class="outer-shape"
+				cx="48"
+				cy="48"
+				r="48"
+				fill="#000"
+			/>
+			<path
+				class="inner-shape"
+				fill="#FFF"
+				d="M10.2966071,46 L0.759821429,46 L0.759821429,15.2881537 L10.2966071,15.2881537 L10.2966071,46 Z M5.52308036,11.0987745 C2.47352679,11.0987745 1.17239551e-12,8.57282522 1.17239551e-12,5.52320357 C1.17239551e-12,2.47282245 2.47276734,-9.65449942e-13 5.52308036,-9.65449942e-13 C8.57339338,-9.65449942e-13 11.0461607,2.47282245 11.0461607,5.52320357 C11.0461607,8.57282522 8.57160714,11.0987745 5.52308036,11.0987745 Z M45.9897321,46 L36.4734821,46 L36.4734821,31.0496663 C36.4734821,27.4866403 36.4016071,22.9173419 31.5151339,22.9173419 C26.5567857,22.9173419 25.7969643,26.7884104 25.7969643,30.7929641 L25.7969643,46 L16.2704464,46 L16.2704464,15.2881537 L25.4170536,15.2881537 L25.4170536,19.4775329 L25.5505357,19.4775329 C26.82375,17.0645326 29.9338839,14.5180472 34.5739286,14.5180472 C44.2257143,14.5180472 46,20.8739927 46,29.1295341 L46,46 L45.9897321,46 Z"
+				transform="translate(25 25)"
+			/>
+		</g>
+	</svg>
+</a>
+</li>
+<li>
+	<a href="https://github.com/brianmaierjr" target="_blank">
+		<svg
+			id="github"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path
+				class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.5)"
+				d="M50,1C22.938,1,1,22.938,1,50s21.938,49,49,49s49-21.938,49-49S77.062,1,50,1z M79.099,79.099 c-3.782,3.782-8.184,6.75-13.083,8.823c-1.245,0.526-2.509,0.989-3.79,1.387v-7.344c0-3.86-1.324-6.699-3.972-8.517 c1.659-0.16,3.182-0.383,4.57-0.67c1.388-0.287,2.855-0.702,4.402-1.245c1.547-0.543,2.935-1.189,4.163-1.938 c1.228-0.75,2.409-1.723,3.541-2.919s2.082-2.552,2.847-4.067s1.372-3.334,1.818-5.455c0.446-2.121,0.67-4.458,0.67-7.01 c0-4.945-1.611-9.155-4.833-12.633c1.467-3.828,1.308-7.991-0.478-12.489l-1.197-0.143c-0.829-0.096-2.321,0.255-4.474,1.053 c-2.153,0.798-4.57,2.105-7.249,3.924c-3.797-1.053-7.736-1.579-11.82-1.579c-4.115,0-8.039,0.526-11.772,1.579 c-1.69-1.149-3.294-2.097-4.809-2.847c-1.515-0.75-2.727-1.26-3.637-1.532c-0.909-0.271-1.754-0.439-2.536-0.503 c-0.782-0.064-1.284-0.079-1.507-0.048c-0.223,0.031-0.383,0.064-0.478,0.096c-1.787,4.53-1.946,8.694-0.478,12.489 c-3.222,3.477-4.833,7.688-4.833,12.633c0,2.552,0.223,4.889,0.67,7.01c0.447,2.121,1.053,3.94,1.818,5.455 c0.765,1.515,1.715,2.871,2.847,4.067s2.313,2.169,3.541,2.919c1.228,0.751,2.616,1.396,4.163,1.938 c1.547,0.543,3.014,0.957,4.402,1.245c1.388,0.287,2.911,0.511,4.57,0.67c-2.616,1.787-3.924,4.626-3.924,8.517v7.487 c-1.445-0.43-2.869-0.938-4.268-1.53c-4.899-2.073-9.301-5.041-13.083-8.823c-3.782-3.782-6.75-8.184-8.823-13.083 C9.934,60.948,8.847,55.56,8.847,50s1.087-10.948,3.231-16.016c2.073-4.899,5.041-9.301,8.823-13.083s8.184-6.75,13.083-8.823 C39.052,9.934,44.44,8.847,50,8.847s10.948,1.087,16.016,3.231c4.9,2.073,9.301,5.041,13.083,8.823 c3.782,3.782,6.75,8.184,8.823,13.083c2.143,5.069,3.23,10.457,3.23,16.016s-1.087,10.948-3.231,16.016 C85.848,70.915,82.88,75.317,79.099,79.099L79.099,79.099z"
+			></path>
+		</svg>
+	</a>
+</li>
+<li>
+	<a href="https://i-am-a-fish.tumblr.com/" target="_blank">
+		<svg
+			id="tumblr"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.18)"
+				d="M210.857,197.545c-1.616-0.872-3.584-0.787-5.119,0.223c-11.62,7.638-23.4,11.511-35.016,11.511 c-6.242,0-11.605-1.394-16.416-4.275c-3.27-1.936-6.308-5.321-7.397-8.263c-1.057-2.797-1.045-10.327-1.029-20.748l0.005-63.543 h52.795c2.762,0,5-2.239,5-5V62.802c0-2.761-2.238-5-5-5h-52.795V5c0-2.761-2.238-5-5-5h-35.566c-2.528,0-4.658,1.887-4.964,4.397 c-1.486,12.229-4.258,22.383-8.247,30.196c-3.89,7.7-9.153,14.401-15.651,19.925c-5.206,4.44-14.118,8.736-26.49,12.769 c-2.058,0.671-3.45,2.589-3.45,4.754v35.41c0,2.761,2.238,5,5,5h28.953v82.666c0,12.181,1.292,21.347,3.952,28.026 c2.71,6.785,7.521,13.174,14.303,18.993c6.671,5.716,14.79,10.187,24.158,13.298c9.082,2.962,16.315,4.567,28.511,4.567 c10.31,0,20.137-1.069,29.213-3.179c8.921-2.082,19.017-5.761,30.008-10.934c1.753-0.825,2.871-2.587,2.871-4.524v-39.417 C213.484,200.108,212.476,198.418,210.857,197.545z"></path>
+		</svg>
+	</a>
+</li>
+<li>
+	<a href="https://www.youtube.com/@RickAstleyYT" target="_blank">
+		<svg
+			id="youtube"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path fill="#FFF" fill-rule="evenodd" clip-rule="evenodd"
+				d="M18.168 19.0028C20.4724 19.0867 22.41 17.29 22.5 14.9858V9.01982C22.41 6.71569 20.4724 4.91893 18.168 5.00282H6.832C4.52763 4.91893 2.58998 6.71569 2.5 9.01982V14.9858C2.58998 17.29 4.52763 19.0867 6.832 19.0028H18.168Z"
+				stroke="#000000" stroke-width="0"
+				stroke-linecap="round" stroke-linejoin="round"
+				transform="translate(22,22) scale(2.3)"></path>
+			<path class="outer-shape" fill-rule="evenodd" clip-rule="evenodd"
+				d="M12.008 9.17784L15.169 11.3258C15.3738 11.4454 15.4997 11.6647 15.4997 11.9018C15.4997 12.139 15.3738 12.3583 15.169 12.4778L12.008 14.8278C11.408 15.2348 10.5 14.8878 10.5 14.2518V9.75184C10.5 9.11884 11.409 8.77084 12.008 9.17784Z"
+				stroke-linecap="round" stroke-linejoin="round"
+				transform="translate(22,22) scale(2.3)"></path>
+		</svg>
+	</a>
+</li>
+<li>
+	<a href="mailto:brimaidesigns@gmail.com" target="_blank">
+		<svg
+			id="mail"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path
+				class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.5)"
+				d="M50,1C22.938,1,1,22.938,1,50s21.938,49,49,49s49-21.938,49-49S77.062,1,50,1z M25.5,25.5h49 c0.874,0,1.723,0.188,2.502,0.542L50,57.544L22.998,26.041C23.777,25.687,24.626,25.499,25.5,25.5L25.5,25.5z M19.375,68.375v-36.75 c0-0.128,0.005-0.256,0.014-0.383l17.96,20.953L19.587,69.958C19.448,69.447,19.376,68.916,19.375,68.375L19.375,68.375z M74.5,74.5 h-49c-0.541,0-1.072-0.073-1.583-0.212l17.429-17.429L50,66.956l8.653-10.096l17.429,17.429C75.572,74.427,75.041,74.5,74.5,74.5 L74.5,74.5z M80.625,68.375c0,0.541-0.073,1.072-0.211,1.583L62.652,52.195l17.96-20.953c0.008,0.127,0.014,0.255,0.014,0.383 L80.625,68.375L80.625,68.375z"
+			></path>
+		</svg>
+	</a>
+</li>
+</ul>
+		</div>
+	</div>
+</div>
+<!-- end .footer -->
+<!-- Add jQuery and other scripts -->
+<script src="//ajax.googleapis.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
+<script>window.jQuery || document.write('<script src=/blog/assets/js/jquery-1.11.2.min.js><\/script>')</script>
+<script src="/blog/assets/js/dropcap.min.js"></script>
+<script src="/blog/assets/js/responsive-nav.min.js"></script>
+<script src="/blog/assets/js/scripts.js"></script>
+</body>
+
+</html>
