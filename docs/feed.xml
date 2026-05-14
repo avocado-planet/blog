@@ -5,9 +5,296 @@
     <description>Long Form Jekyll theme built with SASS</description>
     <link>https://avocado-planet.github.io/</link>
     <atom:link href="https://avocado-planet.github.io/feed.xml" rel="self" type="application/rss+xml"/>
-    <pubDate>Wed, 29 Apr 2026 08:41:51 +0000</pubDate>
-    <lastBuildDate>Wed, 29 Apr 2026 08:41:51 +0000</lastBuildDate>
+    <pubDate>Thu, 14 May 2026 13:46:43 +0000</pubDate>
+    <lastBuildDate>Thu, 14 May 2026 13:46:43 +0000</lastBuildDate>
     <generator>Jekyll v3.10.0</generator><item>
+        <title>RAGの精度を上げる実践テクニック完全ガイド — Re-Rankから検索・チャンク・クエリ改善まで</title>
+        <description>&lt;p&gt;RAG（Retrieval-Augmented Generation）を構築してみたものの、回答の精度がいまいち安定しない——そんな経験はないだろうか。&lt;/p&gt;
+
+&lt;p&gt;実は RAG の精度改善には多くのアプローチがあり、大きく &lt;strong&gt;「検索の質」「チャンクの質」「LLMへの渡し方」「クエリ自体」「Embedding」&lt;/strong&gt; の5つの方向に分類できる。本記事では、まず多くの人がつまずく「なぜ検索結果がズレるのか」という問題から出発し、各テクニックを実装コード付きで解説する。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;そもそもなぜ精度が出ないのか&quot;&gt;そもそもなぜ精度が出ないのか&lt;/h2&gt;
+
+&lt;p&gt;RAG の検索フェーズ（Retriever）は、ベクトル類似度やキーワードマッチで候補を「広く」取ってくる。この初期検索は&lt;strong&gt;速度優先&lt;/strong&gt;で設計されているため、返ってくる上位チャンクが必ずしも質問に対して最も関連性が高いとは限らない。&lt;/p&gt;
+
+&lt;p&gt;例えば「LangChainのメモリ機能」と聞いたとき、Retriever の top-10 に「LangChainのインストール手順」や「メモリ管理（OS）」が混ざることがある。&lt;/p&gt;
+
+&lt;p&gt;この「検索のズレ」を様々な角度から補正するのが、以下のテクニック群だ。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;1-re-rankリランク-検索結果の並べ替え&quot;&gt;1. Re-Rank（リランク）— 検索結果の並べ替え&lt;/h2&gt;
+
+&lt;h3 id=&quot;考え方&quot;&gt;考え方&lt;/h3&gt;
+
+&lt;p&gt;Retriever が返した候補（例: top-20〜50件）を、より高精度なモデルで&lt;strong&gt;並べ替えて&lt;/strong&gt;、本当に関連性の高い上位 k 件だけを LLM に渡す。&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;Query
+  ↓
+Retriever（高速・粗い） → 候補 20件
+  ↓
+Re-Ranker（低速・高精度） → 上位 5件に絞る
+  ↓
+LLM（回答生成）
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;h3 id=&quot;なぜ効くのか&quot;&gt;なぜ効くのか&lt;/h3&gt;
+
+&lt;p&gt;Retriever（Bi-Encoder）はクエリとドキュメントを&lt;strong&gt;別々に&lt;/strong&gt;ベクトル化して比較する。一方 Re-Ranker（Cross-Encoder）は&lt;strong&gt;クエリとドキュメントのペアを同時に&lt;/strong&gt;入力して関連度スコアを出す。ペアごとに処理するので遅いが、文脈の噛み合いを深く評価できる。&lt;/p&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt; &lt;/th&gt;
+      &lt;th&gt;Retriever (Bi-Encoder)&lt;/th&gt;
+      &lt;th&gt;Re-Ranker (Cross-Encoder)&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;入力&lt;/td&gt;
+      &lt;td&gt;query と doc を別々にエンコード&lt;/td&gt;
+      &lt;td&gt;(query, doc) ペアを同時にエンコード&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;速度&lt;/td&gt;
+      &lt;td&gt;高速（数百万件OK）&lt;/td&gt;
+      &lt;td&gt;低速（数十〜数百件が限界）&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;精度&lt;/td&gt;
+      &lt;td&gt;そこそこ&lt;/td&gt;
+      &lt;td&gt;高い&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;h3 id=&quot;代表的なサービスモデル&quot;&gt;代表的なサービス／モデル&lt;/h3&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;&lt;strong&gt;Cohere Rerank&lt;/strong&gt; — API一発で使える手軽さが魅力&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;bge-reranker&lt;/strong&gt;, &lt;strong&gt;ms-marco-MiniLM&lt;/strong&gt; — オープンソースの Cross-Encoder モデル&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;ColBERT&lt;/strong&gt; — 遅延インタラクション（Late Interaction）で速度と精度のバランスを取る&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h3 id=&quot;langchain-での実装&quot;&gt;LangChain での実装&lt;/h3&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;kn&quot;&gt;from&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;langchain.retrievers&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ContextualCompressionRetriever&lt;/span&gt;
+&lt;span class=&quot;kn&quot;&gt;from&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;langchain_cohere&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;CohereRerank&lt;/span&gt;
+
+&lt;span class=&quot;c1&quot;&gt;# 1. ベースの Retriever（広めに取る）
+&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;base_retriever&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;vectorstore&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;as_retriever&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;search_kwargs&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;k&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;20&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;})&lt;/span&gt;
+
+&lt;span class=&quot;c1&quot;&gt;# 2. Re-Ranker でラップ
+&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;reranker&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;CohereRerank&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;model&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;rerank-v3.5&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;top_n&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;5&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;span class=&quot;n&quot;&gt;retriever&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ContextualCompressionRetriever&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;base_compressor&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;reranker&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;base_retriever&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;base_retriever&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+
+&lt;span class=&quot;c1&quot;&gt;# 3. 使う
+&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;docs&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;retriever&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;invoke&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;LangChainのメモリ機能について&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;ポイントは &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;k=20&lt;/code&gt; で広めに取って、&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;top_n=5&lt;/code&gt; で絞るという&lt;strong&gt;二段構え&lt;/strong&gt;。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;2-検索retrievalの改善&quot;&gt;2. 検索（Retrieval）の改善&lt;/h2&gt;
+
+&lt;h3 id=&quot;multi-query-retriever&quot;&gt;Multi-Query Retriever&lt;/h3&gt;
+
+&lt;p&gt;ユーザーの質問を LLM で複数の言い換えに展開し、それぞれで検索して結果を統合する。&lt;/p&gt;
+
+&lt;p&gt;「メモリ機能」→「会話履歴の保持方法」「チャット状態の管理」など、&lt;strong&gt;表現のミスマッチ&lt;/strong&gt;を補える。&lt;/p&gt;
+
+&lt;h3 id=&quot;hydehypothetical-document-embeddings&quot;&gt;HyDE（Hypothetical Document Embeddings）&lt;/h3&gt;
+
+&lt;p&gt;クエリから LLM に「仮の回答文」を生成させ、その仮回答をベクトル検索に使う。質問文よりも回答文のほうがドキュメントと語彙・文体が近いため、検索精度が上がる。&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&quot;LangChainのメモリ機能とは？&quot;
+  ↓ LLMが仮回答を生成
+&quot;LangChainのメモリ機能は、ConversationBufferMemoryや
+ ConversationSummaryMemoryなどを通じて会話履歴を保持し...&quot;
+  ↓ この仮回答でベクトル検索
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;欠点は LLM 呼び出しが1回増えるのでレイテンシとコストが上がること。&lt;/p&gt;
+
+&lt;h3 id=&quot;hybrid-search--reciprocal-rank-fusion-rrf&quot;&gt;Hybrid Search + Reciprocal Rank Fusion (RRF)&lt;/h3&gt;
+
+&lt;p&gt;BM25（キーワード）とベクトル検索の結果を RRF で統合する。各検索結果の順位（rank）の逆数を足し合わせてスコア化するシンプルな方式だが、異なる検索戦略の長所を活かせる。&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;c1&quot;&gt;# RRF の考え方（k=60が一般的）
+&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;score&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;doc&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;Σ&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;1&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;/&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;k&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;rank_i&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;Re-Rank の前段として使うと特に効果的。&lt;/p&gt;
+
+&lt;h3 id=&quot;self-query-retriever&quot;&gt;Self-Query Retriever&lt;/h3&gt;
+
+&lt;p&gt;「2024年以降のPythonに関する記事」のようなクエリから、LLM がメタデータフィルタ（&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;year &amp;gt;= 2024&lt;/code&gt;, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;topic == &quot;Python&quot;&lt;/code&gt;）を自動生成し、ベクトル検索と組み合わせる。メタデータが整備されたドキュメントで特に有効。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;3-チャンク戦略の改善&quot;&gt;3. チャンク戦略の改善&lt;/h2&gt;
+
+&lt;h3 id=&quot;parent-document-retriever&quot;&gt;Parent Document Retriever&lt;/h3&gt;
+
+&lt;p&gt;小さいチャンク（例: 200トークン）で検索の精度を上げつつ、LLM には親チャンク（例: 2000トークン）を渡す。&lt;strong&gt;検索精度と文脈の豊富さを両立する&lt;/strong&gt;。&lt;/p&gt;
+
+&lt;h3 id=&quot;semantic-chunking&quot;&gt;Semantic Chunking&lt;/h3&gt;
+
+&lt;p&gt;固定長ではなく、文の意味的な境界で分割する。隣接する文の Embedding 類似度を計算し、類似度が大きく下がる箇所を分割点にする。&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;文1 ── 類似度0.92 ── 文2 ── 類似度0.88 ── 文3 ── 類似度0.31 ── 文4
+                                              ↑ ここで分割
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;LangChain の &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;SemanticChunker&lt;/code&gt; で実装可能。&lt;/p&gt;
+
+&lt;h3 id=&quot;document-summary-index&quot;&gt;Document Summary Index&lt;/h3&gt;
+
+&lt;p&gt;各ドキュメント全体の要約を事前に作成し、要約に対して検索 → 該当ドキュメントの詳細チャンクを取得、という二段階検索。長い文書が多い場合に効果的。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;4-llm-への渡し方の改善&quot;&gt;4. LLM への渡し方の改善&lt;/h2&gt;
+
+&lt;h3 id=&quot;lost-in-the-middle-対策&quot;&gt;Lost in the Middle 対策&lt;/h3&gt;
+
+&lt;p&gt;LLM は入力の&lt;strong&gt;先頭と末尾に注意が偏り、中間部分を見落としがち&lt;/strong&gt;という研究がある。対策として、関連度の高いチャンクをプロンプトの先頭と末尾に配置し、低いものを中間に置く。または単純にチャンク数を絞る（Re-Rank が効く理由でもある）。&lt;/p&gt;
+
+&lt;h3 id=&quot;contextual-compression&quot;&gt;Contextual Compression&lt;/h3&gt;
+
+&lt;p&gt;取得したチャンクから、クエリに関連する部分だけを LLM で抽出・圧縮してから回答生成に渡す。ノイズが減り、コンテキストウィンドウも節約できる。&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;kn&quot;&gt;from&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;langchain.retrievers.document_compressors&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;LLMChainExtractor&lt;/span&gt;
+
+&lt;span class=&quot;n&quot;&gt;compressor&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;LLMChainExtractor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;from_llm&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;llm&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;span class=&quot;n&quot;&gt;retriever&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ContextualCompressionRetriever&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;base_compressor&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;compressor&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;base_retriever&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;base_retriever&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;h3 id=&quot;self-rag&quot;&gt;Self-RAG&lt;/h3&gt;
+
+&lt;p&gt;取得したドキュメントを LLM 自身が評価し、関連性が低いと判断したら無視する、または追加検索を行うという自律的なアプローチ。「検索するかどうか」「取得結果が有用か」「回答が取得結果に裏付けられているか」を段階的に判定する。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;5-クエリ自体の改善&quot;&gt;5. クエリ自体の改善&lt;/h2&gt;
+
+&lt;h3 id=&quot;step-back-prompting&quot;&gt;Step-Back Prompting&lt;/h3&gt;
+
+&lt;p&gt;具体的すぎる質問を一段抽象化してから検索する。&lt;/p&gt;
+
+&lt;p&gt;「Python 3.12 の match 文でガード句はどう書く？」→「Python の構造的パターンマッチングの構文」で検索し、より広い文脈を取得してから回答。&lt;/p&gt;
+
+&lt;h3 id=&quot;query-decomposition&quot;&gt;Query Decomposition&lt;/h3&gt;
+
+&lt;p&gt;複合的な質問を複数のサブクエリに分解し、それぞれ検索して統合する。&lt;/p&gt;
+
+&lt;p&gt;「LangChainとLlamaIndexのRAG実装の違いは？」→ サブ1「LangChainのRAG実装方法」+ サブ2「LlamaIndexのRAG実装方法」→ 統合して比較回答。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;6-embedding-の改善&quot;&gt;6. Embedding の改善&lt;/h2&gt;
+
+&lt;h3 id=&quot;fine-tuned-embeddings&quot;&gt;Fine-tuned Embeddings&lt;/h3&gt;
+
+&lt;p&gt;ドメイン固有のデータで Embedding モデルを fine-tune する。専門用語が多い領域（例: ITSM、医療、法律）では、汎用 Embedding モデルだと語彙のミスマッチが起きやすいため効果が大きい。&lt;/p&gt;
+
+&lt;h3 id=&quot;colbertlate-interaction&quot;&gt;ColBERT（Late Interaction）&lt;/h3&gt;
+
+&lt;p&gt;トークンレベルで query と document の類似度を計算する。Bi-Encoder の速度と Cross-Encoder の精度の中間に位置する。RAGatouille ライブラリで手軽に試せる。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;実践的な優先順位&quot;&gt;実践的な優先順位&lt;/h2&gt;
+
+&lt;p&gt;すべてを一度に導入するのは非現実的なので、&lt;strong&gt;コスト対効果の高い順&lt;/strong&gt;に並べるとこうなる：&lt;/p&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;優先度&lt;/th&gt;
+      &lt;th&gt;手法&lt;/th&gt;
+      &lt;th&gt;導入コスト&lt;/th&gt;
+      &lt;th&gt;効果&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;★★★&lt;/td&gt;
+      &lt;td&gt;Hybrid Search (BM25 + Vector)&lt;/td&gt;
+      &lt;td&gt;低&lt;/td&gt;
+      &lt;td&gt;高&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;★★★&lt;/td&gt;
+      &lt;td&gt;Re-Rank&lt;/td&gt;
+      &lt;td&gt;低&lt;/td&gt;
+      &lt;td&gt;高&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;★★☆&lt;/td&gt;
+      &lt;td&gt;Parent Document Retriever&lt;/td&gt;
+      &lt;td&gt;低&lt;/td&gt;
+      &lt;td&gt;中〜高&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;★★☆&lt;/td&gt;
+      &lt;td&gt;Multi-Query Retriever&lt;/td&gt;
+      &lt;td&gt;低&lt;/td&gt;
+      &lt;td&gt;中&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;★★☆&lt;/td&gt;
+      &lt;td&gt;Semantic Chunking&lt;/td&gt;
+      &lt;td&gt;中&lt;/td&gt;
+      &lt;td&gt;中〜高&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;★☆☆&lt;/td&gt;
+      &lt;td&gt;HyDE&lt;/td&gt;
+      &lt;td&gt;中&lt;/td&gt;
+      &lt;td&gt;中&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;★☆☆&lt;/td&gt;
+      &lt;td&gt;Contextual Compression / Self-RAG&lt;/td&gt;
+      &lt;td&gt;高&lt;/td&gt;
+      &lt;td&gt;高&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;★☆☆&lt;/td&gt;
+      &lt;td&gt;Fine-tuned Embeddings&lt;/td&gt;
+      &lt;td&gt;高&lt;/td&gt;
+      &lt;td&gt;高（ドメイン特化時）&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;まずは &lt;strong&gt;Hybrid Search → Re-Rank → チャンク戦略の見直し&lt;/strong&gt;という順で進めるのが、最も効率的な改善パスだろう。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;まとめ&quot;&gt;まとめ&lt;/h2&gt;
+
+&lt;p&gt;RAG の精度改善は「どれか一つの銀の弾丸」ではなく、&lt;strong&gt;複数のテクニックを組み合わせるパイプライン設計&lt;/strong&gt;が鍵になる。特に Hybrid Search + Re-Rank の組み合わせは、実装が簡単なわりに効果が大きく、最初に試す価値がある。&lt;/p&gt;
+
+&lt;p&gt;その上で、チャンク戦略（Semantic Chunking、Parent Document）やクエリ改善（Multi-Query、HyDE）を重ねていくことで、段階的に精度を引き上げていける。&lt;/p&gt;
+
+&lt;p&gt;重要なのは、闇雲にテクニックを追加するのではなく、&lt;strong&gt;自分のデータと質問パターンに対してどこがボトルネックになっているかを見極めること&lt;/strong&gt;。検索結果のノイズが問題なら Re-Rank、語彙のミスマッチなら Multi-Query や HyDE、チャンクの粒度が問題なら Semantic Chunking——というように、課題に合った手法を選ぶのが最短ルートだ。&lt;/p&gt;
+</description><description>&lt;p&gt;RAG（Retrieval-Augmented Generation）を構築してみたものの、回答の精度がいまいち安定しない——そんな経験はないだろうか。&lt;/p&gt;
+
+</description><pubDate>Thu, 14 May 2026 00:00:00 +0000</pubDate>
+        <link>https://avocado-planet.github.io/blog/rag-accuracy-improvement-techniques/</link>
+        <guid isPermaLink="true">https://avocado-planet.github.io/blog/rag-accuracy-improvement-techniques/</guid></item><item>
         <title>ローカルでLLMを動かす方法まとめ：apfel、Ollama、LangChain連携</title>
         <description>&lt;p&gt;クラウドAPIを使わずに、自分のマシン上でLLMを動かす方法をまとめました。プライバシー重視、コスト削減、オフライン利用など、ローカルLLMには多くのメリットがあります。&lt;/p&gt;
 

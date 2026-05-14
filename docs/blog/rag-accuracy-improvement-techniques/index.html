@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<!--[if lt IE 7]><html class="no-js lt-ie9 lt-ie8 lt-ie7"><![endif]-->
+<!--[if IE 7]><html class="no-js lt-ie9 lt-ie8" <![endif]-->
+<!--[if IE 8]><html class="no-js lt-ie9" <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js"> <!--<![endif]--><head>
+	<meta charset="utf-8" />
+	<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<meta name="description" content="" />
+	<title>RAGの精度を上げる実践テクニック完全ガイド — Re-Rankから検索・チャンク・クエリ改善まで</title>
+
+	<!-- Open Graph Meta -->
+	<meta content="Long Haul" property="og:site_name" /><meta content="RAGの精度を上げる実践テクニック完全ガイド — Re-Rankから検索・チャンク・クエリ改善まで" property="og:title" /><meta content="article" property="og:type" /><meta content="RAG（Retrieval-Augmented Generation）の回答精度を向上させるための主要テクニックを体系的に解説。Re-Rank、Hybrid Search、HyDE、Semantic Chunking、Self-RAGなど、実践で使える手法を優先順位付きで紹介します。" property="og:description" /><meta content="https://avocado-planet.github.io/blog/blog/rag-accuracy-improvement-techniques/" property="og:url" /><meta
+		content="2026-05-14T00:00:00+00:00"
+		property="article:published_time"
+	/>
+	<meta content="https://avocado-planet.github.io/blog/about/" property="article:author" /><meta
+		content="https://avocado-planet.github.io/blog/assets/img/touring.jpg"
+		property="og:image"
+	/><!-- Twitter Cards -->
+	<meta name="twitter:card" content="summary" />
+	<meta name="twitter:site" content="@brianmaierjr" />
+	<meta name="twitter:creator" content="@brianmaierjr" /><meta name="twitter:title" content="RAGの精度を上げる実践テクニック完全ガイド — Re-Rankから検索・チャンク・クエリ改善まで" /><meta name="twitter:url" content="https://avocado-planet.github.io/blog/blog/rag-accuracy-improvement-techniques/" /><meta name="twitter:description" content="RAG（Retrieval-Augmented Generation）の回答精度を向上させるための主要テクニックを体系的に解説。Re-Rank、Hybrid Search、HyDE、Semantic Chunking、Self-RAGなど、実践で使える手法を優先順位付きで紹介します。" /><meta
+		name="twitter:image:src"
+		content="https://avocado-planet.github.io/blog/assets/img/touring.jpg"
+	/><!-- Favicon -->
+	<link rel="icon" type="image/x-icon" href=""/>
+
+	<!-- Come and get me RSS readers -->
+	<link rel="alternate" type="application/rss+xml" title="Long Haul"
+	href="https://avocado-planet.github.io/blog/feed.xml" />
+
+	<!-- Stylesheet -->
+	<link rel="stylesheet" href="/blog/assets/css/style.css" />
+
+	<!-- Canonical URL -->
+	<link
+		rel="canonical"
+		href="https://avocado-planet.github.io/blog/blog/rag-accuracy-improvement-techniques/"
+	/><!-- Google Analytics: change UA-XXXXX-X to be your site's ID. -->
+<script>
+   (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+    (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+    m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+    })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+ga('create', 'UA-58263416-1', 'auto');
+ga('send', 'pageview');
+
+</script>
+</head>
+<body> <div class="header ">
+     <div class="container">
+         <h1 class="logo"><a href="/blog/">Long Haul</a></h1>
+         <nav class="nav-collapse">
+             <ul class="noList"><li class="elementfirst">
+                     <a href="/blog/index.html">Home</a>
+                 </li><li class="element">
+                     <a href="/blog/about">About</a>
+                 </li><li class="elementlast">
+                     <a href="/blog/contact">Contact</a>
+                 </li><li> <a href="https://github.com/brianmaierjr/long-haul" target="_blank">GitHub</a></li>
+                 <li><a href="https://github.com/brianmaierjr/long-haul/archive/master.zip">Download Theme</a></li>
+             </ul>
+         </nav>
+     </div>
+ </div><!-- end .header -->
+<div class="content">
+      <div class="container">
+         <article class="post"><header>
+    <h1 class="postTitle">RAGの精度を上げる実践テクニック完全ガイド — Re-Rankから検索・チャンク・クエリ改善まで</h1>
+    <p class="meta">May 14, 2026 | <span class="time">3</span> Minute Read</p>
+  </header>
+
+  <p>RAG（Retrieval-Augmented Generation）を構築してみたものの、回答の精度がいまいち安定しない——そんな経験はないだろうか。</p>
+
+<p>実は RAG の精度改善には多くのアプローチがあり、大きく <strong>「検索の質」「チャンクの質」「LLMへの渡し方」「クエリ自体」「Embedding」</strong> の5つの方向に分類できる。本記事では、まず多くの人がつまずく「なぜ検索結果がズレるのか」という問題から出発し、各テクニックを実装コード付きで解説する。</p>
+
+<hr />
+
+<h2 id="そもそもなぜ精度が出ないのか">そもそもなぜ精度が出ないのか</h2>
+
+<p>RAG の検索フェーズ（Retriever）は、ベクトル類似度やキーワードマッチで候補を「広く」取ってくる。この初期検索は<strong>速度優先</strong>で設計されているため、返ってくる上位チャンクが必ずしも質問に対して最も関連性が高いとは限らない。</p>
+
+<p>例えば「LangChainのメモリ機能」と聞いたとき、Retriever の top-10 に「LangChainのインストール手順」や「メモリ管理（OS）」が混ざることがある。</p>
+
+<p>この「検索のズレ」を様々な角度から補正するのが、以下のテクニック群だ。</p>
+
+<hr />
+
+<h2 id="1-re-rankリランク-検索結果の並べ替え">1. Re-Rank（リランク）— 検索結果の並べ替え</h2>
+
+<h3 id="考え方">考え方</h3>
+
+<p>Retriever が返した候補（例: top-20〜50件）を、より高精度なモデルで<strong>並べ替えて</strong>、本当に関連性の高い上位 k 件だけを LLM に渡す。</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Query
+  ↓
+Retriever（高速・粗い） → 候補 20件
+  ↓
+Re-Ranker（低速・高精度） → 上位 5件に絞る
+  ↓
+LLM（回答生成）
+</code></pre></div></div>
+
+<h3 id="なぜ効くのか">なぜ効くのか</h3>
+
+<p>Retriever（Bi-Encoder）はクエリとドキュメントを<strong>別々に</strong>ベクトル化して比較する。一方 Re-Ranker（Cross-Encoder）は<strong>クエリとドキュメントのペアを同時に</strong>入力して関連度スコアを出す。ペアごとに処理するので遅いが、文脈の噛み合いを深く評価できる。</p>
+
+<table>
+  <thead>
+    <tr>
+      <th> </th>
+      <th>Retriever (Bi-Encoder)</th>
+      <th>Re-Ranker (Cross-Encoder)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>入力</td>
+      <td>query と doc を別々にエンコード</td>
+      <td>(query, doc) ペアを同時にエンコード</td>
+    </tr>
+    <tr>
+      <td>速度</td>
+      <td>高速（数百万件OK）</td>
+      <td>低速（数十〜数百件が限界）</td>
+    </tr>
+    <tr>
+      <td>精度</td>
+      <td>そこそこ</td>
+      <td>高い</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="代表的なサービスモデル">代表的なサービス／モデル</h3>
+
+<ul>
+  <li><strong>Cohere Rerank</strong> — API一発で使える手軽さが魅力</li>
+  <li><strong>bge-reranker</strong>, <strong>ms-marco-MiniLM</strong> — オープンソースの Cross-Encoder モデル</li>
+  <li><strong>ColBERT</strong> — 遅延インタラクション（Late Interaction）で速度と精度のバランスを取る</li>
+</ul>
+
+<h3 id="langchain-での実装">LangChain での実装</h3>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">langchain.retrievers</span> <span class="kn">import</span> <span class="n">ContextualCompressionRetriever</span>
+<span class="kn">from</span> <span class="nn">langchain_cohere</span> <span class="kn">import</span> <span class="n">CohereRerank</span>
+
+<span class="c1"># 1. ベースの Retriever（広めに取る）
+</span><span class="n">base_retriever</span> <span class="o">=</span> <span class="n">vectorstore</span><span class="p">.</span><span class="n">as_retriever</span><span class="p">(</span><span class="n">search_kwargs</span><span class="o">=</span><span class="p">{</span><span class="s">"k"</span><span class="p">:</span> <span class="mi">20</span><span class="p">})</span>
+
+<span class="c1"># 2. Re-Ranker でラップ
+</span><span class="n">reranker</span> <span class="o">=</span> <span class="n">CohereRerank</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s">"rerank-v3.5"</span><span class="p">,</span> <span class="n">top_n</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+<span class="n">retriever</span> <span class="o">=</span> <span class="n">ContextualCompressionRetriever</span><span class="p">(</span>
+    <span class="n">base_compressor</span><span class="o">=</span><span class="n">reranker</span><span class="p">,</span>
+    <span class="n">base_retriever</span><span class="o">=</span><span class="n">base_retriever</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="c1"># 3. 使う
+</span><span class="n">docs</span> <span class="o">=</span> <span class="n">retriever</span><span class="p">.</span><span class="n">invoke</span><span class="p">(</span><span class="s">"LangChainのメモリ機能について"</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>ポイントは <code class="language-plaintext highlighter-rouge">k=20</code> で広めに取って、<code class="language-plaintext highlighter-rouge">top_n=5</code> で絞るという<strong>二段構え</strong>。</p>
+
+<hr />
+
+<h2 id="2-検索retrievalの改善">2. 検索（Retrieval）の改善</h2>
+
+<h3 id="multi-query-retriever">Multi-Query Retriever</h3>
+
+<p>ユーザーの質問を LLM で複数の言い換えに展開し、それぞれで検索して結果を統合する。</p>
+
+<p>「メモリ機能」→「会話履歴の保持方法」「チャット状態の管理」など、<strong>表現のミスマッチ</strong>を補える。</p>
+
+<h3 id="hydehypothetical-document-embeddings">HyDE（Hypothetical Document Embeddings）</h3>
+
+<p>クエリから LLM に「仮の回答文」を生成させ、その仮回答をベクトル検索に使う。質問文よりも回答文のほうがドキュメントと語彙・文体が近いため、検索精度が上がる。</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>"LangChainのメモリ機能とは？"
+  ↓ LLMが仮回答を生成
+"LangChainのメモリ機能は、ConversationBufferMemoryや
+ ConversationSummaryMemoryなどを通じて会話履歴を保持し..."
+  ↓ この仮回答でベクトル検索
+</code></pre></div></div>
+
+<p>欠点は LLM 呼び出しが1回増えるのでレイテンシとコストが上がること。</p>
+
+<h3 id="hybrid-search--reciprocal-rank-fusion-rrf">Hybrid Search + Reciprocal Rank Fusion (RRF)</h3>
+
+<p>BM25（キーワード）とベクトル検索の結果を RRF で統合する。各検索結果の順位（rank）の逆数を足し合わせてスコア化するシンプルな方式だが、異なる検索戦略の長所を活かせる。</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># RRF の考え方（k=60が一般的）
+</span><span class="n">score</span><span class="p">(</span><span class="n">doc</span><span class="p">)</span> <span class="o">=</span> <span class="n">Σ</span> <span class="mi">1</span> <span class="o">/</span> <span class="p">(</span><span class="n">k</span> <span class="o">+</span> <span class="n">rank_i</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Re-Rank の前段として使うと特に効果的。</p>
+
+<h3 id="self-query-retriever">Self-Query Retriever</h3>
+
+<p>「2024年以降のPythonに関する記事」のようなクエリから、LLM がメタデータフィルタ（<code class="language-plaintext highlighter-rouge">year &gt;= 2024</code>, <code class="language-plaintext highlighter-rouge">topic == "Python"</code>）を自動生成し、ベクトル検索と組み合わせる。メタデータが整備されたドキュメントで特に有効。</p>
+
+<hr />
+
+<h2 id="3-チャンク戦略の改善">3. チャンク戦略の改善</h2>
+
+<h3 id="parent-document-retriever">Parent Document Retriever</h3>
+
+<p>小さいチャンク（例: 200トークン）で検索の精度を上げつつ、LLM には親チャンク（例: 2000トークン）を渡す。<strong>検索精度と文脈の豊富さを両立する</strong>。</p>
+
+<h3 id="semantic-chunking">Semantic Chunking</h3>
+
+<p>固定長ではなく、文の意味的な境界で分割する。隣接する文の Embedding 類似度を計算し、類似度が大きく下がる箇所を分割点にする。</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>文1 ── 類似度0.92 ── 文2 ── 類似度0.88 ── 文3 ── 類似度0.31 ── 文4
+                                              ↑ ここで分割
+</code></pre></div></div>
+
+<p>LangChain の <code class="language-plaintext highlighter-rouge">SemanticChunker</code> で実装可能。</p>
+
+<h3 id="document-summary-index">Document Summary Index</h3>
+
+<p>各ドキュメント全体の要約を事前に作成し、要約に対して検索 → 該当ドキュメントの詳細チャンクを取得、という二段階検索。長い文書が多い場合に効果的。</p>
+
+<hr />
+
+<h2 id="4-llm-への渡し方の改善">4. LLM への渡し方の改善</h2>
+
+<h3 id="lost-in-the-middle-対策">Lost in the Middle 対策</h3>
+
+<p>LLM は入力の<strong>先頭と末尾に注意が偏り、中間部分を見落としがち</strong>という研究がある。対策として、関連度の高いチャンクをプロンプトの先頭と末尾に配置し、低いものを中間に置く。または単純にチャンク数を絞る（Re-Rank が効く理由でもある）。</p>
+
+<h3 id="contextual-compression">Contextual Compression</h3>
+
+<p>取得したチャンクから、クエリに関連する部分だけを LLM で抽出・圧縮してから回答生成に渡す。ノイズが減り、コンテキストウィンドウも節約できる。</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">langchain.retrievers.document_compressors</span> <span class="kn">import</span> <span class="n">LLMChainExtractor</span>
+
+<span class="n">compressor</span> <span class="o">=</span> <span class="n">LLMChainExtractor</span><span class="p">.</span><span class="n">from_llm</span><span class="p">(</span><span class="n">llm</span><span class="p">)</span>
+<span class="n">retriever</span> <span class="o">=</span> <span class="n">ContextualCompressionRetriever</span><span class="p">(</span>
+    <span class="n">base_compressor</span><span class="o">=</span><span class="n">compressor</span><span class="p">,</span>
+    <span class="n">base_retriever</span><span class="o">=</span><span class="n">base_retriever</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div></div>
+
+<h3 id="self-rag">Self-RAG</h3>
+
+<p>取得したドキュメントを LLM 自身が評価し、関連性が低いと判断したら無視する、または追加検索を行うという自律的なアプローチ。「検索するかどうか」「取得結果が有用か」「回答が取得結果に裏付けられているか」を段階的に判定する。</p>
+
+<hr />
+
+<h2 id="5-クエリ自体の改善">5. クエリ自体の改善</h2>
+
+<h3 id="step-back-prompting">Step-Back Prompting</h3>
+
+<p>具体的すぎる質問を一段抽象化してから検索する。</p>
+
+<p>「Python 3.12 の match 文でガード句はどう書く？」→「Python の構造的パターンマッチングの構文」で検索し、より広い文脈を取得してから回答。</p>
+
+<h3 id="query-decomposition">Query Decomposition</h3>
+
+<p>複合的な質問を複数のサブクエリに分解し、それぞれ検索して統合する。</p>
+
+<p>「LangChainとLlamaIndexのRAG実装の違いは？」→ サブ1「LangChainのRAG実装方法」+ サブ2「LlamaIndexのRAG実装方法」→ 統合して比較回答。</p>
+
+<hr />
+
+<h2 id="6-embedding-の改善">6. Embedding の改善</h2>
+
+<h3 id="fine-tuned-embeddings">Fine-tuned Embeddings</h3>
+
+<p>ドメイン固有のデータで Embedding モデルを fine-tune する。専門用語が多い領域（例: ITSM、医療、法律）では、汎用 Embedding モデルだと語彙のミスマッチが起きやすいため効果が大きい。</p>
+
+<h3 id="colbertlate-interaction">ColBERT（Late Interaction）</h3>
+
+<p>トークンレベルで query と document の類似度を計算する。Bi-Encoder の速度と Cross-Encoder の精度の中間に位置する。RAGatouille ライブラリで手軽に試せる。</p>
+
+<hr />
+
+<h2 id="実践的な優先順位">実践的な優先順位</h2>
+
+<p>すべてを一度に導入するのは非現実的なので、<strong>コスト対効果の高い順</strong>に並べるとこうなる：</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>優先度</th>
+      <th>手法</th>
+      <th>導入コスト</th>
+      <th>効果</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>★★★</td>
+      <td>Hybrid Search (BM25 + Vector)</td>
+      <td>低</td>
+      <td>高</td>
+    </tr>
+    <tr>
+      <td>★★★</td>
+      <td>Re-Rank</td>
+      <td>低</td>
+      <td>高</td>
+    </tr>
+    <tr>
+      <td>★★☆</td>
+      <td>Parent Document Retriever</td>
+      <td>低</td>
+      <td>中〜高</td>
+    </tr>
+    <tr>
+      <td>★★☆</td>
+      <td>Multi-Query Retriever</td>
+      <td>低</td>
+      <td>中</td>
+    </tr>
+    <tr>
+      <td>★★☆</td>
+      <td>Semantic Chunking</td>
+      <td>中</td>
+      <td>中〜高</td>
+    </tr>
+    <tr>
+      <td>★☆☆</td>
+      <td>HyDE</td>
+      <td>中</td>
+      <td>中</td>
+    </tr>
+    <tr>
+      <td>★☆☆</td>
+      <td>Contextual Compression / Self-RAG</td>
+      <td>高</td>
+      <td>高</td>
+    </tr>
+    <tr>
+      <td>★☆☆</td>
+      <td>Fine-tuned Embeddings</td>
+      <td>高</td>
+      <td>高（ドメイン特化時）</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>まずは <strong>Hybrid Search → Re-Rank → チャンク戦略の見直し</strong>という順で進めるのが、最も効率的な改善パスだろう。</p>
+
+<hr />
+
+<h2 id="まとめ">まとめ</h2>
+
+<p>RAG の精度改善は「どれか一つの銀の弾丸」ではなく、<strong>複数のテクニックを組み合わせるパイプライン設計</strong>が鍵になる。特に Hybrid Search + Re-Rank の組み合わせは、実装が簡単なわりに効果が大きく、最初に試す価値がある。</p>
+
+<p>その上で、チャンク戦略（Semantic Chunking、Parent Document）やクエリ改善（Multi-Query、HyDE）を重ねていくことで、段階的に精度を引き上げていける。</p>
+
+<p>重要なのは、闇雲にテクニックを追加するのではなく、<strong>自分のデータと質問パターンに対してどこがボトルネックになっているかを見極めること</strong>。検索結果のノイズが問題なら Re-Rank、語彙のミスマッチなら Multi-Query や HyDE、チャンクの粒度が問題なら Semantic Chunking——というように、課題に合った手法を選ぶのが最短ルートだ。</p>
+
+
+  <!-- POST NAVIGATION -->
+  <footer class="postNav clearfix"><a class="prev" href="/blog/blog/local-llm-guide/"><span>&laquo;&nbsp;ローカルでLLMを動かす方法まとめ：apfel、Ollama、LangChain連携</span></a></footer>
+</article>
+      </div>
+   </div><!-- end .content --><div class="footer">
+	<div class="container">
+		<p class="copy">
+			&copy; 2026
+			<a href="http://brianmaierjr.com">Brian Maier Jr.</a> Powered by
+			<a href="http://jekyllrb.com">Jekyll</a>
+		</p>
+
+		<div class="footer-links">
+			<ul class="noList"><li>
+	<a href="https://www.facebook.com/brianmaierjr" target="_blank">
+		<svg
+			id="facebook-square"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path
+				class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.5)"
+				d="M82.667,1H17.335C8.351,1,1,8.351,1,17.336v65.329c0,8.99,7.351,16.335,16.334,16.335h65.332 C91.652,99.001,99,91.655,99,82.665V17.337C99,8.353,91.652,1.001,82.667,1L82.667,1z M84.318,50H68.375v42.875H50V50h-8.855V35.973 H50v-9.11c0-12.378,5.339-19.739,19.894-19.739h16.772V22.3H72.967c-4.066-0.007-4.57,2.12-4.57,6.078l-0.023,7.594H86.75 l-2.431,14.027V50z"
+			></path>
+		</svg>
+	</a>
+</li>
+<li>
+	<a href="https://twitter.com/brianmaierjr" target="_blank">
+		<svg
+			id="twitter"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path
+				class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.5)"
+				d="M99.001,19.428c-3.606,1.608-7.48,2.695-11.547,3.184c4.15-2.503,7.338-6.466,8.841-11.189 c-3.885,2.318-8.187,4-12.768,4.908c-3.667-3.931-8.893-6.387-14.676-6.387c-11.104,0-20.107,9.054-20.107,20.223 c0,1.585,0.177,3.128,0.52,4.609c-16.71-0.845-31.525-8.895-41.442-21.131C6.092,16.633,5.1,20.107,5.1,23.813 c0,7.017,3.55,13.208,8.945,16.834c-3.296-0.104-6.397-1.014-9.106-2.529c-0.002,0.085-0.002,0.17-0.002,0.255 c0,9.799,6.931,17.972,16.129,19.831c-1.688,0.463-3.463,0.71-5.297,0.71c-1.296,0-2.555-0.127-3.783-0.363 c2.559,8.034,9.984,13.882,18.782,14.045c-6.881,5.424-15.551,8.657-24.971,8.657c-1.623,0-3.223-0.096-4.796-0.282 c8.898,5.738,19.467,9.087,30.82,9.087c36.982,0,57.206-30.817,57.206-57.543c0-0.877-0.02-1.748-0.059-2.617 C92.896,27.045,96.305,23.482,99.001,19.428z"
+			></path>
+		</svg>
+	</a>
+</li>
+<li>
+	<a href="https://www.linkedin.com/in/brianmaierjr" target="_blank">
+	<svg
+		id="linkedin"
+		xmlns="http://www.w3.org/2000/svg"
+		width="96"
+		height="96"
+		viewBox="0 0 96 96"
+	>
+		<g fill="none">
+			<circle
+				class="outer-shape"
+				cx="48"
+				cy="48"
+				r="48"
+				fill="#000"
+			/>
+			<path
+				class="inner-shape"
+				fill="#FFF"
+				d="M10.2966071,46 L0.759821429,46 L0.759821429,15.2881537 L10.2966071,15.2881537 L10.2966071,46 Z M5.52308036,11.0987745 C2.47352679,11.0987745 1.17239551e-12,8.57282522 1.17239551e-12,5.52320357 C1.17239551e-12,2.47282245 2.47276734,-9.65449942e-13 5.52308036,-9.65449942e-13 C8.57339338,-9.65449942e-13 11.0461607,2.47282245 11.0461607,5.52320357 C11.0461607,8.57282522 8.57160714,11.0987745 5.52308036,11.0987745 Z M45.9897321,46 L36.4734821,46 L36.4734821,31.0496663 C36.4734821,27.4866403 36.4016071,22.9173419 31.5151339,22.9173419 C26.5567857,22.9173419 25.7969643,26.7884104 25.7969643,30.7929641 L25.7969643,46 L16.2704464,46 L16.2704464,15.2881537 L25.4170536,15.2881537 L25.4170536,19.4775329 L25.5505357,19.4775329 C26.82375,17.0645326 29.9338839,14.5180472 34.5739286,14.5180472 C44.2257143,14.5180472 46,20.8739927 46,29.1295341 L46,46 L45.9897321,46 Z"
+				transform="translate(25 25)"
+			/>
+		</g>
+	</svg>
+</a>
+</li>
+<li>
+	<a href="https://github.com/brianmaierjr" target="_blank">
+		<svg
+			id="github"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path
+				class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.5)"
+				d="M50,1C22.938,1,1,22.938,1,50s21.938,49,49,49s49-21.938,49-49S77.062,1,50,1z M79.099,79.099 c-3.782,3.782-8.184,6.75-13.083,8.823c-1.245,0.526-2.509,0.989-3.79,1.387v-7.344c0-3.86-1.324-6.699-3.972-8.517 c1.659-0.16,3.182-0.383,4.57-0.67c1.388-0.287,2.855-0.702,4.402-1.245c1.547-0.543,2.935-1.189,4.163-1.938 c1.228-0.75,2.409-1.723,3.541-2.919s2.082-2.552,2.847-4.067s1.372-3.334,1.818-5.455c0.446-2.121,0.67-4.458,0.67-7.01 c0-4.945-1.611-9.155-4.833-12.633c1.467-3.828,1.308-7.991-0.478-12.489l-1.197-0.143c-0.829-0.096-2.321,0.255-4.474,1.053 c-2.153,0.798-4.57,2.105-7.249,3.924c-3.797-1.053-7.736-1.579-11.82-1.579c-4.115,0-8.039,0.526-11.772,1.579 c-1.69-1.149-3.294-2.097-4.809-2.847c-1.515-0.75-2.727-1.26-3.637-1.532c-0.909-0.271-1.754-0.439-2.536-0.503 c-0.782-0.064-1.284-0.079-1.507-0.048c-0.223,0.031-0.383,0.064-0.478,0.096c-1.787,4.53-1.946,8.694-0.478,12.489 c-3.222,3.477-4.833,7.688-4.833,12.633c0,2.552,0.223,4.889,0.67,7.01c0.447,2.121,1.053,3.94,1.818,5.455 c0.765,1.515,1.715,2.871,2.847,4.067s2.313,2.169,3.541,2.919c1.228,0.751,2.616,1.396,4.163,1.938 c1.547,0.543,3.014,0.957,4.402,1.245c1.388,0.287,2.911,0.511,4.57,0.67c-2.616,1.787-3.924,4.626-3.924,8.517v7.487 c-1.445-0.43-2.869-0.938-4.268-1.53c-4.899-2.073-9.301-5.041-13.083-8.823c-3.782-3.782-6.75-8.184-8.823-13.083 C9.934,60.948,8.847,55.56,8.847,50s1.087-10.948,3.231-16.016c2.073-4.899,5.041-9.301,8.823-13.083s8.184-6.75,13.083-8.823 C39.052,9.934,44.44,8.847,50,8.847s10.948,1.087,16.016,3.231c4.9,2.073,9.301,5.041,13.083,8.823 c3.782,3.782,6.75,8.184,8.823,13.083c2.143,5.069,3.23,10.457,3.23,16.016s-1.087,10.948-3.231,16.016 C85.848,70.915,82.88,75.317,79.099,79.099L79.099,79.099z"
+			></path>
+		</svg>
+	</a>
+</li>
+<li>
+	<a href="https://i-am-a-fish.tumblr.com/" target="_blank">
+		<svg
+			id="tumblr"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.18)"
+				d="M210.857,197.545c-1.616-0.872-3.584-0.787-5.119,0.223c-11.62,7.638-23.4,11.511-35.016,11.511 c-6.242,0-11.605-1.394-16.416-4.275c-3.27-1.936-6.308-5.321-7.397-8.263c-1.057-2.797-1.045-10.327-1.029-20.748l0.005-63.543 h52.795c2.762,0,5-2.239,5-5V62.802c0-2.761-2.238-5-5-5h-52.795V5c0-2.761-2.238-5-5-5h-35.566c-2.528,0-4.658,1.887-4.964,4.397 c-1.486,12.229-4.258,22.383-8.247,30.196c-3.89,7.7-9.153,14.401-15.651,19.925c-5.206,4.44-14.118,8.736-26.49,12.769 c-2.058,0.671-3.45,2.589-3.45,4.754v35.41c0,2.761,2.238,5,5,5h28.953v82.666c0,12.181,1.292,21.347,3.952,28.026 c2.71,6.785,7.521,13.174,14.303,18.993c6.671,5.716,14.79,10.187,24.158,13.298c9.082,2.962,16.315,4.567,28.511,4.567 c10.31,0,20.137-1.069,29.213-3.179c8.921-2.082,19.017-5.761,30.008-10.934c1.753-0.825,2.871-2.587,2.871-4.524v-39.417 C213.484,200.108,212.476,198.418,210.857,197.545z"></path>
+		</svg>
+	</a>
+</li>
+<li>
+	<a href="https://www.youtube.com/@RickAstleyYT" target="_blank">
+		<svg
+			id="youtube"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path fill="#FFF" fill-rule="evenodd" clip-rule="evenodd"
+				d="M18.168 19.0028C20.4724 19.0867 22.41 17.29 22.5 14.9858V9.01982C22.41 6.71569 20.4724 4.91893 18.168 5.00282H6.832C4.52763 4.91893 2.58998 6.71569 2.5 9.01982V14.9858C2.58998 17.29 4.52763 19.0867 6.832 19.0028H18.168Z"
+				stroke="#000000" stroke-width="0"
+				stroke-linecap="round" stroke-linejoin="round"
+				transform="translate(22,22) scale(2.3)"></path>
+			<path class="outer-shape" fill-rule="evenodd" clip-rule="evenodd"
+				d="M12.008 9.17784L15.169 11.3258C15.3738 11.4454 15.4997 11.6647 15.4997 11.9018C15.4997 12.139 15.3738 12.3583 15.169 12.4778L12.008 14.8278C11.408 15.2348 10.5 14.8878 10.5 14.2518V9.75184C10.5 9.11884 11.409 8.77084 12.008 9.17784Z"
+				stroke-linecap="round" stroke-linejoin="round"
+				transform="translate(22,22) scale(2.3)"></path>
+		</svg>
+	</a>
+</li>
+<li>
+	<a href="mailto:brimaidesigns@gmail.com" target="_blank">
+		<svg
+			id="mail"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path
+				class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.5)"
+				d="M50,1C22.938,1,1,22.938,1,50s21.938,49,49,49s49-21.938,49-49S77.062,1,50,1z M25.5,25.5h49 c0.874,0,1.723,0.188,2.502,0.542L50,57.544L22.998,26.041C23.777,25.687,24.626,25.499,25.5,25.5L25.5,25.5z M19.375,68.375v-36.75 c0-0.128,0.005-0.256,0.014-0.383l17.96,20.953L19.587,69.958C19.448,69.447,19.376,68.916,19.375,68.375L19.375,68.375z M74.5,74.5 h-49c-0.541,0-1.072-0.073-1.583-0.212l17.429-17.429L50,66.956l8.653-10.096l17.429,17.429C75.572,74.427,75.041,74.5,74.5,74.5 L74.5,74.5z M80.625,68.375c0,0.541-0.073,1.072-0.211,1.583L62.652,52.195l17.96-20.953c0.008,0.127,0.014,0.255,0.014,0.383 L80.625,68.375L80.625,68.375z"
+			></path>
+		</svg>
+	</a>
+</li>
+</ul>
+		</div>
+	</div>
+</div>
+<!-- end .footer -->
+<!-- Add jQuery and other scripts -->
+<script src="//ajax.googleapis.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
+<script>window.jQuery || document.write('<script src=/blog/assets/js/jquery-1.11.2.min.js><\/script>')</script>
+<script src="/blog/assets/js/dropcap.min.js"></script>
+<script src="/blog/assets/js/responsive-nav.min.js"></script>
+<script src="/blog/assets/js/scripts.js"></script>
+</body>
+
+</html>
