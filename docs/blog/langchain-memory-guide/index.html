@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<!--[if lt IE 7]><html class="no-js lt-ie9 lt-ie8 lt-ie7"><![endif]-->
+<!--[if IE 7]><html class="no-js lt-ie9 lt-ie8" <![endif]-->
+<!--[if IE 8]><html class="no-js lt-ie9" <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js"> <!--<![endif]--><head>
+	<meta charset="utf-8" />
+	<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<meta name="description" content="" />
+	<title>LangChainのメモリ（会話履歴）完全ガイド — レガシーからLangGraphへ</title>
+
+	<!-- Open Graph Meta -->
+	<meta content="Long Haul" property="og:site_name" /><meta content="LangChainのメモリ（会話履歴）完全ガイド — レガシーからLangGraphへ" property="og:title" /><meta content="article" property="og:type" /><meta content="LangChainアプリにおける会話履歴の保持方法を徹底解説。旧Memoryクラスの仕組みと廃止の背景、現在推奨されるLangGraphのCheckpointer/Storeベースの設計まで、メリット・デメリットを比較しながら整理します。" property="og:description" /><meta content="https://avocado-planet.github.io/blog/blog/langchain-memory-guide/" property="og:url" /><meta
+		content="2026-05-25T00:00:00+00:00"
+		property="article:published_time"
+	/>
+	<meta content="https://avocado-planet.github.io/blog/about/" property="article:author" /><meta
+		content="https://avocado-planet.github.io/blog/assets/img/touring.jpg"
+		property="og:image"
+	/><!-- Twitter Cards -->
+	<meta name="twitter:card" content="summary" />
+	<meta name="twitter:site" content="@brianmaierjr" />
+	<meta name="twitter:creator" content="@brianmaierjr" /><meta name="twitter:title" content="LangChainのメモリ（会話履歴）完全ガイド — レガシーからLangGraphへ" /><meta name="twitter:url" content="https://avocado-planet.github.io/blog/blog/langchain-memory-guide/" /><meta name="twitter:description" content="LangChainアプリにおける会話履歴の保持方法を徹底解説。旧Memoryクラスの仕組みと廃止の背景、現在推奨されるLangGraphのCheckpointer/Storeベースの設計まで、メリット・デメリットを比較しながら整理します。" /><meta
+		name="twitter:image:src"
+		content="https://avocado-planet.github.io/blog/assets/img/touring.jpg"
+	/><!-- Favicon -->
+	<link rel="icon" type="image/x-icon" href=""/>
+
+	<!-- Come and get me RSS readers -->
+	<link rel="alternate" type="application/rss+xml" title="Long Haul"
+	href="https://avocado-planet.github.io/blog/feed.xml" />
+
+	<!-- Stylesheet -->
+	<link rel="stylesheet" href="/blog/assets/css/style.css" />
+
+	<!-- Canonical URL -->
+	<link
+		rel="canonical"
+		href="https://avocado-planet.github.io/blog/blog/langchain-memory-guide/"
+	/><!-- Google Analytics: change UA-XXXXX-X to be your site's ID. -->
+<script>
+   (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+    (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+    m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+    })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+ga('create', 'UA-58263416-1', 'auto');
+ga('send', 'pageview');
+
+</script>
+</head>
+<body> <div class="header ">
+     <div class="container">
+         <h1 class="logo"><a href="/blog/">Long Haul</a></h1>
+         <nav class="nav-collapse">
+             <ul class="noList"><li class="elementfirst">
+                     <a href="/blog/index.html">Home</a>
+                 </li><li class="element">
+                     <a href="/blog/about">About</a>
+                 </li><li class="elementlast">
+                     <a href="/blog/contact">Contact</a>
+                 </li><li> <a href="https://github.com/brianmaierjr/long-haul" target="_blank">GitHub</a></li>
+                 <li><a href="https://github.com/brianmaierjr/long-haul/archive/master.zip">Download Theme</a></li>
+             </ul>
+         </nav>
+     </div>
+ </div><!-- end .header -->
+<div class="content">
+      <div class="container">
+         <article class="post"><header>
+    <h1 class="postTitle">LangChainのメモリ（会話履歴）完全ガイド — レガシーからLangGraphへ</h1>
+    <p class="meta">May 25, 2026 | <span class="time">4</span> Minute Read</p>
+  </header>
+
+  <p>LLMは本質的にステートレスです。<code class="language-plaintext highlighter-rouge">invoke()</code> を呼ぶたびに、前のやり取りは一切覚えていません。チャットボットや対話型エージェントを作るには、<strong>会話履歴をどう保持するか</strong>が設計上の重要な判断ポイントになります。</p>
+
+<p>この記事では、LangChainにおけるメモリの仕組みを「旧方式（レガシーMemoryクラス）」と「現行方式（LangGraphベース）」の両面から整理し、それぞれのメリット・デメリット、そして実務でどう選ぶべきかを解説します。</p>
+
+<h2 id="なぜメモリが必要なのか">なぜメモリが必要なのか</h2>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># メモリなし — 毎回リセットされる
+</span><span class="n">result1</span> <span class="o">=</span> <span class="n">llm</span><span class="p">.</span><span class="n">invoke</span><span class="p">(</span><span class="s">"私の名前はPENGです"</span><span class="p">)</span>  <span class="c1"># → "はじめまして！"
+</span><span class="n">result2</span> <span class="o">=</span> <span class="n">llm</span><span class="p">.</span><span class="n">invoke</span><span class="p">(</span><span class="s">"私の名前は？"</span><span class="p">)</span>          <span class="c1"># → "わかりません"
+</span></code></pre></div></div>
+
+<p>ユーザーが「さっき言ったじゃん」と感じる瞬間、それはメモリが欠けている証拠です。メモリの役割は、過去のメッセージをプロンプトに注入して、LLMに「文脈を知っている風」に振る舞わせることです。</p>
+
+<h2 id="旧方式langchain-memoryクラスv031で非推奨">旧方式：LangChain Memoryクラス（v0.3.1で非推奨）</h2>
+
+<p>LangChain v0.2以前では、<code class="language-plaintext highlighter-rouge">ConversationChain</code> と組み合わせる専用のMemoryクラスが提供されていました。v0.3.1で<strong>すべて非推奨（deprecated）</strong>となり、v1.0で削除予定ですが、概念として理解しておく価値はあります。</p>
+
+<h3 id="1-conversationbuffermemory">1. ConversationBufferMemory</h3>
+
+<p>全メッセージをそのまま保持する、最もシンプルな方式。</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">langchain.memory</span> <span class="kn">import</span> <span class="n">ConversationBufferMemory</span>
+
+<span class="n">memory</span> <span class="o">=</span> <span class="n">ConversationBufferMemory</span><span class="p">(</span><span class="n">return_messages</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+</code></pre></div></div>
+
+<table>
+  <thead>
+    <tr>
+      <th>メリット</th>
+      <th>デメリット</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>実装が最も簡単</td>
+      <td>会話が長くなるとトークン数が爆発する</td>
+    </tr>
+    <tr>
+      <td>情報の欠落がない</td>
+      <td>APIコストが会話長に比例して増大</td>
+    </tr>
+    <tr>
+      <td>デバッグしやすい</td>
+      <td>コンテキストウィンドウ超過でエラーになる</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>向いている場面：</strong> 5〜10ターン程度の短い会話。プロトタイピングやデモ。</p>
+
+<h3 id="2-conversationbufferwindowmemory">2. ConversationBufferWindowMemory</h3>
+
+<p>直近N回分のメッセージだけを保持する。</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">langchain.memory</span> <span class="kn">import</span> <span class="n">ConversationBufferWindowMemory</span>
+
+<span class="n">memory</span> <span class="o">=</span> <span class="n">ConversationBufferWindowMemory</span><span class="p">(</span><span class="n">k</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">return_messages</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span>
+</code></pre></div></div>
+
+<table>
+  <thead>
+    <tr>
+      <th>メリット</th>
+      <th>デメリット</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>トークン使用量が一定に収まる</td>
+      <td>古い文脈が完全に消える</td>
+    </tr>
+    <tr>
+      <td>コスト予測しやすい</td>
+      <td>「最初に伝えたこと」を忘れる</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>向いている場面：</strong> FAQボット、1問1答に近いサポート。</p>
+
+<h3 id="3-conversationsummarymemory">3. ConversationSummaryMemory</h3>
+
+<p>LLMを使って過去の会話を要約し、要約文だけを保持する。</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">langchain.memory</span> <span class="kn">import</span> <span class="n">ConversationSummaryMemory</span>
+
+<span class="n">memory</span> <span class="o">=</span> <span class="n">ConversationSummaryMemory</span><span class="p">(</span><span class="n">llm</span><span class="o">=</span><span class="n">summary_llm</span><span class="p">)</span>
+</code></pre></div></div>
+
+<table>
+  <thead>
+    <tr>
+      <th>メリット</th>
+      <th>デメリット</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>長い会話でもトークンが膨らまない</td>
+      <td>要約のたびにLLM呼び出し → コスト・レイテンシ増</td>
+    </tr>
+    <tr>
+      <td>「大筋」は保持される</td>
+      <td>細かい数値や名前が要約で消えることがある</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>向いている場面：</strong> 数十ターンに及ぶ長い相談、カウンセリング的な対話。</p>
+
+<h3 id="4-conversationsummarybuffermemory">4. ConversationSummaryBufferMemory</h3>
+
+<p>SummaryとBufferのハイブリッド。古いメッセージは要約し、直近メッセージはそのまま保持する。</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">langchain.memory</span> <span class="kn">import</span> <span class="n">ConversationSummaryBufferMemory</span>
+
+<span class="n">memory</span> <span class="o">=</span> <span class="n">ConversationSummaryBufferMemory</span><span class="p">(</span>
+    <span class="n">llm</span><span class="o">=</span><span class="n">summary_llm</span><span class="p">,</span>
+    <span class="n">max_token_limit</span><span class="o">=</span><span class="mi">800</span>
+<span class="p">)</span>
+</code></pre></div></div>
+
+<table>
+  <thead>
+    <tr>
+      <th>メリット</th>
+      <th>デメリット</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>近い文脈は正確、遠い文脈も概要として残る</td>
+      <td>要約LLMのプロンプト設計が品質を左右する</td>
+    </tr>
+    <tr>
+      <td>実用上のバランスが良い</td>
+      <td>実装がやや複雑</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>向いている場面：</strong> 旧方式の中では最も実用的。中〜長期的な対話。</p>
+
+<h3 id="5-conversationentitymemory">5. ConversationEntityMemory</h3>
+
+<p>会話からエンティティ（人名、会社名、概念など）を抽出し、エンティティ単位で情報を保持する。</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>メリット</th>
+      <th>デメリット</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>「誰が何をした」を構造的に記憶</td>
+      <td>エンティティ抽出の精度がLLMに依存</td>
+    </tr>
+    <tr>
+      <td>複数トピックの並行管理に強い</td>
+      <td>実装・デバッグが複雑</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="なぜ全部非推奨になったのか">なぜ全部非推奨になったのか</h3>
+
+<p>旧Memoryクラスが廃止された理由は主に3つです。</p>
+
+<ol>
+  <li><strong>ツール呼び出しに非対応：</strong> 旧Memoryはチャットモデルのtool calling APIより前に設計された。ToolMessage を正しくハンドリングできない</li>
+  <li><strong>プロセス内メモリ限定：</strong> Pythonプロセスを再起動すると会話履歴が消える。本番運用に耐えない</li>
+  <li><strong>APIの一貫性欠如：</strong> Memory種別ごとにインターフェースが微妙に異なり、切り替えが面倒</li>
+</ol>
+
+<h2 id="現行方式langgraphのcheckpointer--store">現行方式：LangGraphのCheckpointer + Store</h2>
+
+<p>LangChain v0.3以降の公式推奨は <strong>LangGraph のCheckpointerベースのメモリ</strong>です。メモリをアプリケーション層から切り離し、永続化層として独立させた設計になっています。</p>
+
+<h3 id="短期メモリcheckpointerスレッド内">短期メモリ：Checkpointer（スレッド内）</h3>
+
+<p>Checkpointerは、グラフの各ステップ実行後に<strong>Stateのスナップショット</strong>を自動保存する仕組みです。</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">langgraph.checkpoint.memory</span> <span class="kn">import</span> <span class="n">MemorySaver</span>
+<span class="kn">from</span> <span class="nn">langgraph.graph</span> <span class="kn">import</span> <span class="n">StateGraph</span><span class="p">,</span> <span class="n">MessagesState</span><span class="p">,</span> <span class="n">START</span><span class="p">,</span> <span class="n">END</span>
+
+<span class="c1"># グラフ定義
+</span><span class="n">builder</span> <span class="o">=</span> <span class="n">StateGraph</span><span class="p">(</span><span class="n">MessagesState</span><span class="p">)</span>
+<span class="n">builder</span><span class="p">.</span><span class="n">add_node</span><span class="p">(</span><span class="s">"chat"</span><span class="p">,</span> <span class="n">chat_node</span><span class="p">)</span>
+<span class="n">builder</span><span class="p">.</span><span class="n">add_edge</span><span class="p">(</span><span class="n">START</span><span class="p">,</span> <span class="s">"chat"</span><span class="p">)</span>
+<span class="n">builder</span><span class="p">.</span><span class="n">add_edge</span><span class="p">(</span><span class="s">"chat"</span><span class="p">,</span> <span class="n">END</span><span class="p">)</span>
+
+<span class="c1"># Checkpointerでコンパイル
+</span><span class="n">checkpointer</span> <span class="o">=</span> <span class="n">MemorySaver</span><span class="p">()</span>
+<span class="n">graph</span> <span class="o">=</span> <span class="n">builder</span><span class="p">.</span><span class="nb">compile</span><span class="p">(</span><span class="n">checkpointer</span><span class="o">=</span><span class="n">checkpointer</span><span class="p">)</span>
+
+<span class="c1"># thread_idで会話を識別
+</span><span class="n">config</span> <span class="o">=</span> <span class="p">{</span><span class="s">"configurable"</span><span class="p">:</span> <span class="p">{</span><span class="s">"thread_id"</span><span class="p">:</span> <span class="s">"user_001"</span><span class="p">}}</span>
+
+<span class="c1"># 1ターン目
+</span><span class="n">graph</span><span class="p">.</span><span class="n">invoke</span><span class="p">({</span><span class="s">"messages"</span><span class="p">:</span> <span class="p">[(</span><span class="s">"user"</span><span class="p">,</span> <span class="s">"私はPENGです"</span><span class="p">)]},</span> <span class="n">config</span><span class="p">)</span>
+
+<span class="c1"># 2ターン目 — 前のやり取りを覚えている
+</span><span class="n">graph</span><span class="p">.</span><span class="n">invoke</span><span class="p">({</span><span class="s">"messages"</span><span class="p">:</span> <span class="p">[(</span><span class="s">"user"</span><span class="p">,</span> <span class="s">"私の名前は？"</span><span class="p">)]},</span> <span class="n">config</span><span class="p">)</span>
+<span class="c1"># → "PENGさんですね"
+</span></code></pre></div></div>
+
+<p>ポイントは <code class="language-plaintext highlighter-rouge">thread_id</code> です。同じ <code class="language-plaintext highlighter-rouge">thread_id</code> なら同じ会話として状態が復元され、異なる <code class="language-plaintext highlighter-rouge">thread_id</code> なら完全に独立した会話になります。</p>
+
+<h4 id="checkpointerの種類">Checkpointerの種類</h4>
+
+<table>
+  <thead>
+    <tr>
+      <th>Checkpointer</th>
+      <th>用途</th>
+      <th>特徴</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">MemorySaver</code></td>
+      <td>開発・テスト</td>
+      <td>プロセス再起動で消える</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">SqliteSaver</code></td>
+      <td>ローカルテスト</td>
+      <td>ファイルに永続化。再起動に耐える</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">PostgresSaver</code></td>
+      <td>本番運用</td>
+      <td>水平スケーリング、クラッシュ復旧可能</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>開発時は <code class="language-plaintext highlighter-rouge">MemorySaver</code> → ローカルテストで <code class="language-plaintext highlighter-rouge">SqliteSaver</code> → 本番で <code class="language-plaintext highlighter-rouge">PostgresSaver</code> とステップアップしていくのが典型的なパスです。インターフェースは全て共通なので、コード変更は1行で済みます。</p>
+
+<h3 id="長期メモリstoreスレッド横断">長期メモリ：Store（スレッド横断）</h3>
+
+<p>Checkpointerは「1つの会話スレッド内」の記憶です。<strong>ユーザーの好みや過去の注文履歴など、スレッドを跨いで覚えておきたい情報</strong>にはStoreを使います。</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">langgraph.store.memory</span> <span class="kn">import</span> <span class="n">InMemoryStore</span>
+
+<span class="n">store</span> <span class="o">=</span> <span class="n">InMemoryStore</span><span class="p">()</span>
+
+<span class="c1"># ノード関数内で明示的にread/writeする
+</span><span class="k">def</span> <span class="nf">chat_node</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">config</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">store</span><span class="p">):</span>
+    <span class="n">user_id</span> <span class="o">=</span> <span class="n">config</span><span class="p">[</span><span class="s">"configurable"</span><span class="p">][</span><span class="s">"user_id"</span><span class="p">]</span>
+
+    <span class="c1"># 長期メモリから読み出し
+</span>    <span class="n">memories</span> <span class="o">=</span> <span class="n">store</span><span class="p">.</span><span class="n">search</span><span class="p">((</span><span class="s">"user_prefs"</span><span class="p">,</span> <span class="n">user_id</span><span class="p">))</span>
+
+    <span class="c1"># ... LLM呼び出し ...
+</span>
+    <span class="c1"># 長期メモリに書き込み
+</span>    <span class="n">store</span><span class="p">.</span><span class="n">put</span><span class="p">((</span><span class="s">"user_prefs"</span><span class="p">,</span> <span class="n">user_id</span><span class="p">),</span> <span class="s">"lang"</span><span class="p">,</span> <span class="s">"ja"</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p><strong>Checkpointer vs Store の使い分け：</strong></p>
+
+<table>
+  <thead>
+    <tr>
+      <th>観点</th>
+      <th>Checkpointer（短期）</th>
+      <th>Store（長期）</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>スコープ</td>
+      <td>1つの <code class="language-plaintext highlighter-rouge">thread_id</code> 内</td>
+      <td><code class="language-plaintext highlighter-rouge">user_id</code> やカスタム namespace</td>
+    </tr>
+    <tr>
+      <td>自動/手動</td>
+      <td>自動（グラフステップごと）</td>
+      <td>手動（ノード内でread/write）</td>
+    </tr>
+    <tr>
+      <td>消えるタイミング</td>
+      <td>スレッド終了時（論理的に）</td>
+      <td>明示削除まで残る</td>
+    </tr>
+    <tr>
+      <td>主な用途</td>
+      <td>会話履歴</td>
+      <td>ユーザー設定、学習データ</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="なぜlanggraphベースが優れているのか">なぜLangGraphベースが優れているのか</h3>
+
+<ol>
+  <li><strong>永続化がデフォルト：</strong> Checkpointerを指定するだけで、プロセス再起動しても会話が復元される</li>
+  <li><strong>ツール呼び出しと自然に統合：</strong> <code class="language-plaintext highlighter-rouge">ToolMessage</code> を含むState全体が保存される</li>
+  <li><strong>タイムトラベル：</strong> 過去のチェックポイントに戻ってやり直せる（Human-in-the-loopに必須）</li>
+  <li><strong>バックエンド交換が容易：</strong> <code class="language-plaintext highlighter-rouge">MemorySaver</code> → <code class="language-plaintext highlighter-rouge">PostgresSaver</code> の切り替えが1行</li>
+</ol>
+
+<h2 id="会話が長くなったらどうする--トリミング戦略">会話が長くなったらどうする？ — トリミング戦略</h2>
+
+<p>LangGraphでは会話履歴はStateに全て蓄積されるので、長い会話ではコンテキストウィンドウを超えるリスクがあります。対策として、ノード内でメッセージをトリミングする方法が推奨されています。</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kn">from</span> <span class="nn">langchain_core.messages</span> <span class="kn">import</span> <span class="n">trim_messages</span>
+
+<span class="k">def</span> <span class="nf">chat_node</span><span class="p">(</span><span class="n">state</span><span class="p">):</span>
+    <span class="c1"># 直近のメッセージだけをLLMに渡す
+</span>    <span class="n">trimmed</span> <span class="o">=</span> <span class="n">trim_messages</span><span class="p">(</span>
+        <span class="n">state</span><span class="p">[</span><span class="s">"messages"</span><span class="p">],</span>
+        <span class="n">max_tokens</span><span class="o">=</span><span class="mi">4000</span><span class="p">,</span>
+        <span class="n">strategy</span><span class="o">=</span><span class="s">"last"</span><span class="p">,</span>
+        <span class="n">token_counter</span><span class="o">=</span><span class="n">llm</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s">"messages"</span><span class="p">:</span> <span class="p">[</span><span class="n">llm</span><span class="p">.</span><span class="n">invoke</span><span class="p">(</span><span class="n">trimmed</span><span class="p">)]}</span>
+</code></pre></div></div>
+
+<p>旧方式の <code class="language-plaintext highlighter-rouge">ConversationBufferWindowMemory</code> に相当する処理ですが、LangGraph版では「Stateには全履歴を保持しつつ、LLMに渡す分だけトリミングする」という設計が可能です。必要に応じて古い履歴を参照できるのが利点です。</p>
+
+<h2 id="実務での推奨パターン">実務での推奨パターン</h2>
+
+<h3 id="シンプルなチャットボット">シンプルなチャットボット</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>LangGraph StateGraph + MemorySaver（開発） or PostgresSaver（本番）
++ trim_messages でトークン管理
+</code></pre></div></div>
+
+<p>これが2026年時点で最もスタンダードな構成です。旧Memoryクラスを使う理由はありません。</p>
+
+<h3 id="ユーザーごとのパーソナライズが必要な場合">ユーザーごとのパーソナライズが必要な場合</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Checkpointer（会話履歴） + Store（ユーザーの長期記憶）
+</code></pre></div></div>
+
+<p>Storeにはユーザーのプロファイル情報や過去の意思決定を保存し、毎会話の冒頭でプロンプトに注入します。</p>
+
+<h3 id="要約が必要な超長期対話">要約が必要な超長期対話</h3>
+
+<p>ノード内で定期的にLLMで要約を生成し、Storeに保存する方式を自分で組みます。旧 <code class="language-plaintext highlighter-rouge">ConversationSummaryMemory</code> に相当しますが、LangGraphでは要約のタイミングやロジックを完全にコントロールできます。</p>
+
+<h2 id="まとめ">まとめ</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>方式</th>
+      <th>ステータス</th>
+      <th>おすすめ度</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>ConversationBufferMemory 等</td>
+      <td>v0.3.1で非推奨、v1.0で削除予定</td>
+      <td>❌ 新規採用不可</td>
+    </tr>
+    <tr>
+      <td>RunnableWithMessageHistory</td>
+      <td>v0.3で非推奨</td>
+      <td>❌</td>
+    </tr>
+    <tr>
+      <td>LangGraph Checkpointer</td>
+      <td>現行推奨</td>
+      <td>✅ これを使う</td>
+    </tr>
+    <tr>
+      <td>LangGraph Store</td>
+      <td>長期メモリが必要な場合</td>
+      <td>✅ Checkpointerと併用</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>LangChainのメモリAPIは18ヶ月で3回変わりました。旧Memoryクラスのコンセプト自体は今でも有用な知識ですが、新規開発では<strong>LangGraphのCheckpointer一択</strong>です。Stateの永続化、ツール呼び出し対応、バックエンドの柔軟性 — すべてが旧方式より優れています。</p>
+
+<p>まずは <code class="language-plaintext highlighter-rouge">MemorySaver</code> で試して、本番に近づいたら <code class="language-plaintext highlighter-rouge">PostgresSaver</code> に切り替える。このシンプルなパスを覚えておけば十分です。</p>
+
+
+  <!-- POST NAVIGATION -->
+  <footer class="postNav clearfix"><a class="prev" href="/blog/blog/rag-accuracy-improvement-techniques/"><span>&laquo;&nbsp;RAGの精度を上げる実践テクニック完全ガイド — Re-Rankから検索・チャンク・クエリ改善まで</span></a></footer>
+</article>
+      </div>
+   </div><!-- end .content --><div class="footer">
+	<div class="container">
+		<p class="copy">
+			&copy; 2026
+			<a href="http://brianmaierjr.com">Brian Maier Jr.</a> Powered by
+			<a href="http://jekyllrb.com">Jekyll</a>
+		</p>
+
+		<div class="footer-links">
+			<ul class="noList"><li>
+	<a href="https://www.facebook.com/brianmaierjr" target="_blank">
+		<svg
+			id="facebook-square"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path
+				class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.5)"
+				d="M82.667,1H17.335C8.351,1,1,8.351,1,17.336v65.329c0,8.99,7.351,16.335,16.334,16.335h65.332 C91.652,99.001,99,91.655,99,82.665V17.337C99,8.353,91.652,1.001,82.667,1L82.667,1z M84.318,50H68.375v42.875H50V50h-8.855V35.973 H50v-9.11c0-12.378,5.339-19.739,19.894-19.739h16.772V22.3H72.967c-4.066-0.007-4.57,2.12-4.57,6.078l-0.023,7.594H86.75 l-2.431,14.027V50z"
+			></path>
+		</svg>
+	</a>
+</li>
+<li>
+	<a href="https://twitter.com/brianmaierjr" target="_blank">
+		<svg
+			id="twitter"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path
+				class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.5)"
+				d="M99.001,19.428c-3.606,1.608-7.48,2.695-11.547,3.184c4.15-2.503,7.338-6.466,8.841-11.189 c-3.885,2.318-8.187,4-12.768,4.908c-3.667-3.931-8.893-6.387-14.676-6.387c-11.104,0-20.107,9.054-20.107,20.223 c0,1.585,0.177,3.128,0.52,4.609c-16.71-0.845-31.525-8.895-41.442-21.131C6.092,16.633,5.1,20.107,5.1,23.813 c0,7.017,3.55,13.208,8.945,16.834c-3.296-0.104-6.397-1.014-9.106-2.529c-0.002,0.085-0.002,0.17-0.002,0.255 c0,9.799,6.931,17.972,16.129,19.831c-1.688,0.463-3.463,0.71-5.297,0.71c-1.296,0-2.555-0.127-3.783-0.363 c2.559,8.034,9.984,13.882,18.782,14.045c-6.881,5.424-15.551,8.657-24.971,8.657c-1.623,0-3.223-0.096-4.796-0.282 c8.898,5.738,19.467,9.087,30.82,9.087c36.982,0,57.206-30.817,57.206-57.543c0-0.877-0.02-1.748-0.059-2.617 C92.896,27.045,96.305,23.482,99.001,19.428z"
+			></path>
+		</svg>
+	</a>
+</li>
+<li>
+	<a href="https://www.linkedin.com/in/brianmaierjr" target="_blank">
+	<svg
+		id="linkedin"
+		xmlns="http://www.w3.org/2000/svg"
+		width="96"
+		height="96"
+		viewBox="0 0 96 96"
+	>
+		<g fill="none">
+			<circle
+				class="outer-shape"
+				cx="48"
+				cy="48"
+				r="48"
+				fill="#000"
+			/>
+			<path
+				class="inner-shape"
+				fill="#FFF"
+				d="M10.2966071,46 L0.759821429,46 L0.759821429,15.2881537 L10.2966071,15.2881537 L10.2966071,46 Z M5.52308036,11.0987745 C2.47352679,11.0987745 1.17239551e-12,8.57282522 1.17239551e-12,5.52320357 C1.17239551e-12,2.47282245 2.47276734,-9.65449942e-13 5.52308036,-9.65449942e-13 C8.57339338,-9.65449942e-13 11.0461607,2.47282245 11.0461607,5.52320357 C11.0461607,8.57282522 8.57160714,11.0987745 5.52308036,11.0987745 Z M45.9897321,46 L36.4734821,46 L36.4734821,31.0496663 C36.4734821,27.4866403 36.4016071,22.9173419 31.5151339,22.9173419 C26.5567857,22.9173419 25.7969643,26.7884104 25.7969643,30.7929641 L25.7969643,46 L16.2704464,46 L16.2704464,15.2881537 L25.4170536,15.2881537 L25.4170536,19.4775329 L25.5505357,19.4775329 C26.82375,17.0645326 29.9338839,14.5180472 34.5739286,14.5180472 C44.2257143,14.5180472 46,20.8739927 46,29.1295341 L46,46 L45.9897321,46 Z"
+				transform="translate(25 25)"
+			/>
+		</g>
+	</svg>
+</a>
+</li>
+<li>
+	<a href="https://github.com/brianmaierjr" target="_blank">
+		<svg
+			id="github"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path
+				class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.5)"
+				d="M50,1C22.938,1,1,22.938,1,50s21.938,49,49,49s49-21.938,49-49S77.062,1,50,1z M79.099,79.099 c-3.782,3.782-8.184,6.75-13.083,8.823c-1.245,0.526-2.509,0.989-3.79,1.387v-7.344c0-3.86-1.324-6.699-3.972-8.517 c1.659-0.16,3.182-0.383,4.57-0.67c1.388-0.287,2.855-0.702,4.402-1.245c1.547-0.543,2.935-1.189,4.163-1.938 c1.228-0.75,2.409-1.723,3.541-2.919s2.082-2.552,2.847-4.067s1.372-3.334,1.818-5.455c0.446-2.121,0.67-4.458,0.67-7.01 c0-4.945-1.611-9.155-4.833-12.633c1.467-3.828,1.308-7.991-0.478-12.489l-1.197-0.143c-0.829-0.096-2.321,0.255-4.474,1.053 c-2.153,0.798-4.57,2.105-7.249,3.924c-3.797-1.053-7.736-1.579-11.82-1.579c-4.115,0-8.039,0.526-11.772,1.579 c-1.69-1.149-3.294-2.097-4.809-2.847c-1.515-0.75-2.727-1.26-3.637-1.532c-0.909-0.271-1.754-0.439-2.536-0.503 c-0.782-0.064-1.284-0.079-1.507-0.048c-0.223,0.031-0.383,0.064-0.478,0.096c-1.787,4.53-1.946,8.694-0.478,12.489 c-3.222,3.477-4.833,7.688-4.833,12.633c0,2.552,0.223,4.889,0.67,7.01c0.447,2.121,1.053,3.94,1.818,5.455 c0.765,1.515,1.715,2.871,2.847,4.067s2.313,2.169,3.541,2.919c1.228,0.751,2.616,1.396,4.163,1.938 c1.547,0.543,3.014,0.957,4.402,1.245c1.388,0.287,2.911,0.511,4.57,0.67c-2.616,1.787-3.924,4.626-3.924,8.517v7.487 c-1.445-0.43-2.869-0.938-4.268-1.53c-4.899-2.073-9.301-5.041-13.083-8.823c-3.782-3.782-6.75-8.184-8.823-13.083 C9.934,60.948,8.847,55.56,8.847,50s1.087-10.948,3.231-16.016c2.073-4.899,5.041-9.301,8.823-13.083s8.184-6.75,13.083-8.823 C39.052,9.934,44.44,8.847,50,8.847s10.948,1.087,16.016,3.231c4.9,2.073,9.301,5.041,13.083,8.823 c3.782,3.782,6.75,8.184,8.823,13.083c2.143,5.069,3.23,10.457,3.23,16.016s-1.087,10.948-3.231,16.016 C85.848,70.915,82.88,75.317,79.099,79.099L79.099,79.099z"
+			></path>
+		</svg>
+	</a>
+</li>
+<li>
+	<a href="https://i-am-a-fish.tumblr.com/" target="_blank">
+		<svg
+			id="tumblr"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.18)"
+				d="M210.857,197.545c-1.616-0.872-3.584-0.787-5.119,0.223c-11.62,7.638-23.4,11.511-35.016,11.511 c-6.242,0-11.605-1.394-16.416-4.275c-3.27-1.936-6.308-5.321-7.397-8.263c-1.057-2.797-1.045-10.327-1.029-20.748l0.005-63.543 h52.795c2.762,0,5-2.239,5-5V62.802c0-2.761-2.238-5-5-5h-52.795V5c0-2.761-2.238-5-5-5h-35.566c-2.528,0-4.658,1.887-4.964,4.397 c-1.486,12.229-4.258,22.383-8.247,30.196c-3.89,7.7-9.153,14.401-15.651,19.925c-5.206,4.44-14.118,8.736-26.49,12.769 c-2.058,0.671-3.45,2.589-3.45,4.754v35.41c0,2.761,2.238,5,5,5h28.953v82.666c0,12.181,1.292,21.347,3.952,28.026 c2.71,6.785,7.521,13.174,14.303,18.993c6.671,5.716,14.79,10.187,24.158,13.298c9.082,2.962,16.315,4.567,28.511,4.567 c10.31,0,20.137-1.069,29.213-3.179c8.921-2.082,19.017-5.761,30.008-10.934c1.753-0.825,2.871-2.587,2.871-4.524v-39.417 C213.484,200.108,212.476,198.418,210.857,197.545z"></path>
+		</svg>
+	</a>
+</li>
+<li>
+	<a href="https://www.youtube.com/@RickAstleyYT" target="_blank">
+		<svg
+			id="youtube"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path fill="#FFF" fill-rule="evenodd" clip-rule="evenodd"
+				d="M18.168 19.0028C20.4724 19.0867 22.41 17.29 22.5 14.9858V9.01982C22.41 6.71569 20.4724 4.91893 18.168 5.00282H6.832C4.52763 4.91893 2.58998 6.71569 2.5 9.01982V14.9858C2.58998 17.29 4.52763 19.0867 6.832 19.0028H18.168Z"
+				stroke="#000000" stroke-width="0"
+				stroke-linecap="round" stroke-linejoin="round"
+				transform="translate(22,22) scale(2.3)"></path>
+			<path class="outer-shape" fill-rule="evenodd" clip-rule="evenodd"
+				d="M12.008 9.17784L15.169 11.3258C15.3738 11.4454 15.4997 11.6647 15.4997 11.9018C15.4997 12.139 15.3738 12.3583 15.169 12.4778L12.008 14.8278C11.408 15.2348 10.5 14.8878 10.5 14.2518V9.75184C10.5 9.11884 11.409 8.77084 12.008 9.17784Z"
+				stroke-linecap="round" stroke-linejoin="round"
+				transform="translate(22,22) scale(2.3)"></path>
+		</svg>
+	</a>
+</li>
+<li>
+	<a href="mailto:brimaidesigns@gmail.com" target="_blank">
+		<svg
+			id="mail"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path
+				class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.5)"
+				d="M50,1C22.938,1,1,22.938,1,50s21.938,49,49,49s49-21.938,49-49S77.062,1,50,1z M25.5,25.5h49 c0.874,0,1.723,0.188,2.502,0.542L50,57.544L22.998,26.041C23.777,25.687,24.626,25.499,25.5,25.5L25.5,25.5z M19.375,68.375v-36.75 c0-0.128,0.005-0.256,0.014-0.383l17.96,20.953L19.587,69.958C19.448,69.447,19.376,68.916,19.375,68.375L19.375,68.375z M74.5,74.5 h-49c-0.541,0-1.072-0.073-1.583-0.212l17.429-17.429L50,66.956l8.653-10.096l17.429,17.429C75.572,74.427,75.041,74.5,74.5,74.5 L74.5,74.5z M80.625,68.375c0,0.541-0.073,1.072-0.211,1.583L62.652,52.195l17.96-20.953c0.008,0.127,0.014,0.255,0.014,0.383 L80.625,68.375L80.625,68.375z"
+			></path>
+		</svg>
+	</a>
+</li>
+</ul>
+		</div>
+	</div>
+</div>
+<!-- end .footer -->
+<!-- Add jQuery and other scripts -->
+<script src="//ajax.googleapis.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
+<script>window.jQuery || document.write('<script src=/blog/assets/js/jquery-1.11.2.min.js><\/script>')</script>
+<script src="/blog/assets/js/dropcap.min.js"></script>
+<script src="/blog/assets/js/responsive-nav.min.js"></script>
+<script src="/blog/assets/js/scripts.js"></script>
+</body>
+
+</html>

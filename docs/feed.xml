@@ -5,9 +5,398 @@
     <description>Long Form Jekyll theme built with SASS</description>
     <link>https://avocado-planet.github.io/</link>
     <atom:link href="https://avocado-planet.github.io/feed.xml" rel="self" type="application/rss+xml"/>
-    <pubDate>Thu, 14 May 2026 13:46:43 +0000</pubDate>
-    <lastBuildDate>Thu, 14 May 2026 13:46:43 +0000</lastBuildDate>
+    <pubDate>Mon, 25 May 2026 13:15:01 +0000</pubDate>
+    <lastBuildDate>Mon, 25 May 2026 13:15:01 +0000</lastBuildDate>
     <generator>Jekyll v3.10.0</generator><item>
+        <title>LangChainのメモリ（会話履歴）完全ガイド — レガシーからLangGraphへ</title>
+        <description>&lt;p&gt;LLMは本質的にステートレスです。&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;invoke()&lt;/code&gt; を呼ぶたびに、前のやり取りは一切覚えていません。チャットボットや対話型エージェントを作るには、&lt;strong&gt;会話履歴をどう保持するか&lt;/strong&gt;が設計上の重要な判断ポイントになります。&lt;/p&gt;
+
+&lt;p&gt;この記事では、LangChainにおけるメモリの仕組みを「旧方式（レガシーMemoryクラス）」と「現行方式（LangGraphベース）」の両面から整理し、それぞれのメリット・デメリット、そして実務でどう選ぶべきかを解説します。&lt;/p&gt;
+
+&lt;h2 id=&quot;なぜメモリが必要なのか&quot;&gt;なぜメモリが必要なのか&lt;/h2&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;c1&quot;&gt;# メモリなし — 毎回リセットされる
+&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;result1&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;llm&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;invoke&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;私の名前はPENGです&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;  &lt;span class=&quot;c1&quot;&gt;# → &quot;はじめまして！&quot;
+&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;result2&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;llm&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;invoke&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;私の名前は？&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;          &lt;span class=&quot;c1&quot;&gt;# → &quot;わかりません&quot;
+&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;ユーザーが「さっき言ったじゃん」と感じる瞬間、それはメモリが欠けている証拠です。メモリの役割は、過去のメッセージをプロンプトに注入して、LLMに「文脈を知っている風」に振る舞わせることです。&lt;/p&gt;
+
+&lt;h2 id=&quot;旧方式langchain-memoryクラスv031で非推奨&quot;&gt;旧方式：LangChain Memoryクラス（v0.3.1で非推奨）&lt;/h2&gt;
+
+&lt;p&gt;LangChain v0.2以前では、&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ConversationChain&lt;/code&gt; と組み合わせる専用のMemoryクラスが提供されていました。v0.3.1で&lt;strong&gt;すべて非推奨（deprecated）&lt;/strong&gt;となり、v1.0で削除予定ですが、概念として理解しておく価値はあります。&lt;/p&gt;
+
+&lt;h3 id=&quot;1-conversationbuffermemory&quot;&gt;1. ConversationBufferMemory&lt;/h3&gt;
+
+&lt;p&gt;全メッセージをそのまま保持する、最もシンプルな方式。&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;kn&quot;&gt;from&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;langchain.memory&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ConversationBufferMemory&lt;/span&gt;
+
+&lt;span class=&quot;n&quot;&gt;memory&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ConversationBufferMemory&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;return_messages&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;bp&quot;&gt;True&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;メリット&lt;/th&gt;
+      &lt;th&gt;デメリット&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;実装が最も簡単&lt;/td&gt;
+      &lt;td&gt;会話が長くなるとトークン数が爆発する&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;情報の欠落がない&lt;/td&gt;
+      &lt;td&gt;APIコストが会話長に比例して増大&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;デバッグしやすい&lt;/td&gt;
+      &lt;td&gt;コンテキストウィンドウ超過でエラーになる&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;&lt;strong&gt;向いている場面：&lt;/strong&gt; 5〜10ターン程度の短い会話。プロトタイピングやデモ。&lt;/p&gt;
+
+&lt;h3 id=&quot;2-conversationbufferwindowmemory&quot;&gt;2. ConversationBufferWindowMemory&lt;/h3&gt;
+
+&lt;p&gt;直近N回分のメッセージだけを保持する。&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;kn&quot;&gt;from&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;langchain.memory&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ConversationBufferWindowMemory&lt;/span&gt;
+
+&lt;span class=&quot;n&quot;&gt;memory&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ConversationBufferWindowMemory&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;k&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;5&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;return_messages&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;bp&quot;&gt;True&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;メリット&lt;/th&gt;
+      &lt;th&gt;デメリット&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;トークン使用量が一定に収まる&lt;/td&gt;
+      &lt;td&gt;古い文脈が完全に消える&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;コスト予測しやすい&lt;/td&gt;
+      &lt;td&gt;「最初に伝えたこと」を忘れる&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;&lt;strong&gt;向いている場面：&lt;/strong&gt; FAQボット、1問1答に近いサポート。&lt;/p&gt;
+
+&lt;h3 id=&quot;3-conversationsummarymemory&quot;&gt;3. ConversationSummaryMemory&lt;/h3&gt;
+
+&lt;p&gt;LLMを使って過去の会話を要約し、要約文だけを保持する。&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;kn&quot;&gt;from&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;langchain.memory&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ConversationSummaryMemory&lt;/span&gt;
+
+&lt;span class=&quot;n&quot;&gt;memory&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ConversationSummaryMemory&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;llm&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;summary_llm&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;メリット&lt;/th&gt;
+      &lt;th&gt;デメリット&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;長い会話でもトークンが膨らまない&lt;/td&gt;
+      &lt;td&gt;要約のたびにLLM呼び出し → コスト・レイテンシ増&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;「大筋」は保持される&lt;/td&gt;
+      &lt;td&gt;細かい数値や名前が要約で消えることがある&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;&lt;strong&gt;向いている場面：&lt;/strong&gt; 数十ターンに及ぶ長い相談、カウンセリング的な対話。&lt;/p&gt;
+
+&lt;h3 id=&quot;4-conversationsummarybuffermemory&quot;&gt;4. ConversationSummaryBufferMemory&lt;/h3&gt;
+
+&lt;p&gt;SummaryとBufferのハイブリッド。古いメッセージは要約し、直近メッセージはそのまま保持する。&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;kn&quot;&gt;from&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;langchain.memory&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ConversationSummaryBufferMemory&lt;/span&gt;
+
+&lt;span class=&quot;n&quot;&gt;memory&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;ConversationSummaryBufferMemory&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;llm&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;summary_llm&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;max_token_limit&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;800&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;メリット&lt;/th&gt;
+      &lt;th&gt;デメリット&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;近い文脈は正確、遠い文脈も概要として残る&lt;/td&gt;
+      &lt;td&gt;要約LLMのプロンプト設計が品質を左右する&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;実用上のバランスが良い&lt;/td&gt;
+      &lt;td&gt;実装がやや複雑&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;&lt;strong&gt;向いている場面：&lt;/strong&gt; 旧方式の中では最も実用的。中〜長期的な対話。&lt;/p&gt;
+
+&lt;h3 id=&quot;5-conversationentitymemory&quot;&gt;5. ConversationEntityMemory&lt;/h3&gt;
+
+&lt;p&gt;会話からエンティティ（人名、会社名、概念など）を抽出し、エンティティ単位で情報を保持する。&lt;/p&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;メリット&lt;/th&gt;
+      &lt;th&gt;デメリット&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;「誰が何をした」を構造的に記憶&lt;/td&gt;
+      &lt;td&gt;エンティティ抽出の精度がLLMに依存&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;複数トピックの並行管理に強い&lt;/td&gt;
+      &lt;td&gt;実装・デバッグが複雑&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;h3 id=&quot;なぜ全部非推奨になったのか&quot;&gt;なぜ全部非推奨になったのか&lt;/h3&gt;
+
+&lt;p&gt;旧Memoryクラスが廃止された理由は主に3つです。&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;&lt;strong&gt;ツール呼び出しに非対応：&lt;/strong&gt; 旧Memoryはチャットモデルのtool calling APIより前に設計された。ToolMessage を正しくハンドリングできない&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;プロセス内メモリ限定：&lt;/strong&gt; Pythonプロセスを再起動すると会話履歴が消える。本番運用に耐えない&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;APIの一貫性欠如：&lt;/strong&gt; Memory種別ごとにインターフェースが微妙に異なり、切り替えが面倒&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;h2 id=&quot;現行方式langgraphのcheckpointer--store&quot;&gt;現行方式：LangGraphのCheckpointer + Store&lt;/h2&gt;
+
+&lt;p&gt;LangChain v0.3以降の公式推奨は &lt;strong&gt;LangGraph のCheckpointerベースのメモリ&lt;/strong&gt;です。メモリをアプリケーション層から切り離し、永続化層として独立させた設計になっています。&lt;/p&gt;
+
+&lt;h3 id=&quot;短期メモリcheckpointerスレッド内&quot;&gt;短期メモリ：Checkpointer（スレッド内）&lt;/h3&gt;
+
+&lt;p&gt;Checkpointerは、グラフの各ステップ実行後に&lt;strong&gt;Stateのスナップショット&lt;/strong&gt;を自動保存する仕組みです。&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;kn&quot;&gt;from&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;langgraph.checkpoint.memory&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;MemorySaver&lt;/span&gt;
+&lt;span class=&quot;kn&quot;&gt;from&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;langgraph.graph&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;StateGraph&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;MessagesState&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;START&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;END&lt;/span&gt;
+
+&lt;span class=&quot;c1&quot;&gt;# グラフ定義
+&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;builder&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;StateGraph&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;MessagesState&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;span class=&quot;n&quot;&gt;builder&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;add_node&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;chat&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;chat_node&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;span class=&quot;n&quot;&gt;builder&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;add_edge&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;START&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;chat&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;span class=&quot;n&quot;&gt;builder&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;add_edge&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;chat&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;END&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+
+&lt;span class=&quot;c1&quot;&gt;# Checkpointerでコンパイル
+&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;checkpointer&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;MemorySaver&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+&lt;span class=&quot;n&quot;&gt;graph&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;builder&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;nb&quot;&gt;compile&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;checkpointer&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;checkpointer&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+
+&lt;span class=&quot;c1&quot;&gt;# thread_idで会話を識別
+&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;config&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;configurable&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;thread_id&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;user_001&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;}}&lt;/span&gt;
+
+&lt;span class=&quot;c1&quot;&gt;# 1ターン目
+&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;graph&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;invoke&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;({&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;messages&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;[(&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;user&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;私はPENGです&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)]},&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;config&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+
+&lt;span class=&quot;c1&quot;&gt;# 2ターン目 — 前のやり取りを覚えている
+&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;graph&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;invoke&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;({&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;messages&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;[(&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;user&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;私の名前は？&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)]},&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;config&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;span class=&quot;c1&quot;&gt;# → &quot;PENGさんですね&quot;
+&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;ポイントは &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;thread_id&lt;/code&gt; です。同じ &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;thread_id&lt;/code&gt; なら同じ会話として状態が復元され、異なる &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;thread_id&lt;/code&gt; なら完全に独立した会話になります。&lt;/p&gt;
+
+&lt;h4 id=&quot;checkpointerの種類&quot;&gt;Checkpointerの種類&lt;/h4&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;Checkpointer&lt;/th&gt;
+      &lt;th&gt;用途&lt;/th&gt;
+      &lt;th&gt;特徴&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;MemorySaver&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;開発・テスト&lt;/td&gt;
+      &lt;td&gt;プロセス再起動で消える&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;SqliteSaver&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;ローカルテスト&lt;/td&gt;
+      &lt;td&gt;ファイルに永続化。再起動に耐える&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;PostgresSaver&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;本番運用&lt;/td&gt;
+      &lt;td&gt;水平スケーリング、クラッシュ復旧可能&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;開発時は &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;MemorySaver&lt;/code&gt; → ローカルテストで &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;SqliteSaver&lt;/code&gt; → 本番で &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;PostgresSaver&lt;/code&gt; とステップアップしていくのが典型的なパスです。インターフェースは全て共通なので、コード変更は1行で済みます。&lt;/p&gt;
+
+&lt;h3 id=&quot;長期メモリstoreスレッド横断&quot;&gt;長期メモリ：Store（スレッド横断）&lt;/h3&gt;
+
+&lt;p&gt;Checkpointerは「1つの会話スレッド内」の記憶です。&lt;strong&gt;ユーザーの好みや過去の注文履歴など、スレッドを跨いで覚えておきたい情報&lt;/strong&gt;にはStoreを使います。&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;kn&quot;&gt;from&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;langgraph.store.memory&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;InMemoryStore&lt;/span&gt;
+
+&lt;span class=&quot;n&quot;&gt;store&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;InMemoryStore&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
+
+&lt;span class=&quot;c1&quot;&gt;# ノード関数内で明示的にread/writeする
+&lt;/span&gt;&lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;chat_node&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;state&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;config&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;*&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;store&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;):&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;user_id&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;config&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;configurable&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;][&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;user_id&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;
+
+    &lt;span class=&quot;c1&quot;&gt;# 長期メモリから読み出し
+&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;memories&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;store&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;search&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;((&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;user_prefs&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;user_id&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;))&lt;/span&gt;
+
+    &lt;span class=&quot;c1&quot;&gt;# ... LLM呼び出し ...
+&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;# 長期メモリに書き込み
+&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;store&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;put&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;((&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;user_prefs&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;user_id&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;),&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;lang&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;ja&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;&lt;strong&gt;Checkpointer vs Store の使い分け：&lt;/strong&gt;&lt;/p&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;観点&lt;/th&gt;
+      &lt;th&gt;Checkpointer（短期）&lt;/th&gt;
+      &lt;th&gt;Store（長期）&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;スコープ&lt;/td&gt;
+      &lt;td&gt;1つの &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;thread_id&lt;/code&gt; 内&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;user_id&lt;/code&gt; やカスタム namespace&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;自動/手動&lt;/td&gt;
+      &lt;td&gt;自動（グラフステップごと）&lt;/td&gt;
+      &lt;td&gt;手動（ノード内でread/write）&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;消えるタイミング&lt;/td&gt;
+      &lt;td&gt;スレッド終了時（論理的に）&lt;/td&gt;
+      &lt;td&gt;明示削除まで残る&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;主な用途&lt;/td&gt;
+      &lt;td&gt;会話履歴&lt;/td&gt;
+      &lt;td&gt;ユーザー設定、学習データ&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;h3 id=&quot;なぜlanggraphベースが優れているのか&quot;&gt;なぜLangGraphベースが優れているのか&lt;/h3&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;&lt;strong&gt;永続化がデフォルト：&lt;/strong&gt; Checkpointerを指定するだけで、プロセス再起動しても会話が復元される&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;ツール呼び出しと自然に統合：&lt;/strong&gt; &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ToolMessage&lt;/code&gt; を含むState全体が保存される&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;タイムトラベル：&lt;/strong&gt; 過去のチェックポイントに戻ってやり直せる（Human-in-the-loopに必須）&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;バックエンド交換が容易：&lt;/strong&gt; &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;MemorySaver&lt;/code&gt; → &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;PostgresSaver&lt;/code&gt; の切り替えが1行&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;h2 id=&quot;会話が長くなったらどうする--トリミング戦略&quot;&gt;会話が長くなったらどうする？ — トリミング戦略&lt;/h2&gt;
+
+&lt;p&gt;LangGraphでは会話履歴はStateに全て蓄積されるので、長い会話ではコンテキストウィンドウを超えるリスクがあります。対策として、ノード内でメッセージをトリミングする方法が推奨されています。&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;kn&quot;&gt;from&lt;/span&gt; &lt;span class=&quot;nn&quot;&gt;langchain_core.messages&lt;/span&gt; &lt;span class=&quot;kn&quot;&gt;import&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;trim_messages&lt;/span&gt;
+
+&lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;chat_node&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;state&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;):&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;# 直近のメッセージだけをLLMに渡す
+&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;trimmed&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;trim_messages&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;
+        &lt;span class=&quot;n&quot;&gt;state&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;messages&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;],&lt;/span&gt;
+        &lt;span class=&quot;n&quot;&gt;max_tokens&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;4000&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+        &lt;span class=&quot;n&quot;&gt;strategy&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;last&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+        &lt;span class=&quot;n&quot;&gt;token_counter&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;llm&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;messages&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;llm&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;invoke&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;trimmed&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)]}&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;旧方式の &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ConversationBufferWindowMemory&lt;/code&gt; に相当する処理ですが、LangGraph版では「Stateには全履歴を保持しつつ、LLMに渡す分だけトリミングする」という設計が可能です。必要に応じて古い履歴を参照できるのが利点です。&lt;/p&gt;
+
+&lt;h2 id=&quot;実務での推奨パターン&quot;&gt;実務での推奨パターン&lt;/h2&gt;
+
+&lt;h3 id=&quot;シンプルなチャットボット&quot;&gt;シンプルなチャットボット&lt;/h3&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;LangGraph StateGraph + MemorySaver（開発） or PostgresSaver（本番）
++ trim_messages でトークン管理
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;これが2026年時点で最もスタンダードな構成です。旧Memoryクラスを使う理由はありません。&lt;/p&gt;
+
+&lt;h3 id=&quot;ユーザーごとのパーソナライズが必要な場合&quot;&gt;ユーザーごとのパーソナライズが必要な場合&lt;/h3&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;Checkpointer（会話履歴） + Store（ユーザーの長期記憶）
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;Storeにはユーザーのプロファイル情報や過去の意思決定を保存し、毎会話の冒頭でプロンプトに注入します。&lt;/p&gt;
+
+&lt;h3 id=&quot;要約が必要な超長期対話&quot;&gt;要約が必要な超長期対話&lt;/h3&gt;
+
+&lt;p&gt;ノード内で定期的にLLMで要約を生成し、Storeに保存する方式を自分で組みます。旧 &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ConversationSummaryMemory&lt;/code&gt; に相当しますが、LangGraphでは要約のタイミングやロジックを完全にコントロールできます。&lt;/p&gt;
+
+&lt;h2 id=&quot;まとめ&quot;&gt;まとめ&lt;/h2&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;方式&lt;/th&gt;
+      &lt;th&gt;ステータス&lt;/th&gt;
+      &lt;th&gt;おすすめ度&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;ConversationBufferMemory 等&lt;/td&gt;
+      &lt;td&gt;v0.3.1で非推奨、v1.0で削除予定&lt;/td&gt;
+      &lt;td&gt;❌ 新規採用不可&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;RunnableWithMessageHistory&lt;/td&gt;
+      &lt;td&gt;v0.3で非推奨&lt;/td&gt;
+      &lt;td&gt;❌&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;LangGraph Checkpointer&lt;/td&gt;
+      &lt;td&gt;現行推奨&lt;/td&gt;
+      &lt;td&gt;✅ これを使う&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;LangGraph Store&lt;/td&gt;
+      &lt;td&gt;長期メモリが必要な場合&lt;/td&gt;
+      &lt;td&gt;✅ Checkpointerと併用&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;LangChainのメモリAPIは18ヶ月で3回変わりました。旧Memoryクラスのコンセプト自体は今でも有用な知識ですが、新規開発では&lt;strong&gt;LangGraphのCheckpointer一択&lt;/strong&gt;です。Stateの永続化、ツール呼び出し対応、バックエンドの柔軟性 — すべてが旧方式より優れています。&lt;/p&gt;
+
+&lt;p&gt;まずは &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;MemorySaver&lt;/code&gt; で試して、本番に近づいたら &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;PostgresSaver&lt;/code&gt; に切り替える。このシンプルなパスを覚えておけば十分です。&lt;/p&gt;
+</description><description>&lt;p&gt;LLMは本質的にステートレスです。&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;invoke()&lt;/code&gt; を呼ぶたびに、前のやり取りは一切覚えていません。チャットボットや対話型エージェントを作るには、&lt;strong&gt;会話履歴をどう保持するか&lt;/strong&gt;が設計上の重要な判断ポイントになります。&lt;/p&gt;
+
+</description><pubDate>Mon, 25 May 2026 00:00:00 +0000</pubDate>
+        <link>https://avocado-planet.github.io/blog/langchain-memory-guide/</link>
+        <guid isPermaLink="true">https://avocado-planet.github.io/blog/langchain-memory-guide/</guid></item><item>
         <title>RAGの精度を上げる実践テクニック完全ガイド — Re-Rankから検索・チャンク・クエリ改善まで</title>
         <description>&lt;p&gt;RAG（Retrieval-Augmented Generation）を構築してみたものの、回答の精度がいまいち安定しない——そんな経験はないだろうか。&lt;/p&gt;
 
@@ -2185,22 +2574,5 @@ x₂=0 なので w₂₁ の z₁ への貢献がゼロ → 責任もゼロ → 
 
 </description><pubDate>Thu, 11 Dec 2014 00:00:00 +0000</pubDate>
         <link>https://avocado-planet.github.io/blog/image-in-post/</link>
-        <guid isPermaLink="true">https://avocado-planet.github.io/blog/image-in-post/</guid></item><item>
-        <title>Test Post</title>
-        <description>&lt;p class=&quot;intro&quot;&gt;&lt;span class=&quot;dropcap&quot;&gt;L&lt;/span&gt;orem ipsum thor smash liege-bastogne-liege landbouwkrediet ombregt krabbe, rouleur derby is for lovers bonk giro gilbert bidon. Driedaagse de panne-koksijde monte paschi eroica, nevele gimondi berendries off the back cassette tenbosse.&lt;/p&gt;
-
-&lt;p&gt;Bahamontes lanterne rouge normandie belgium. Fred paris-nice arrivere, for omnium commissaire ronde van vlaanderen horizontally stiff but vertically compliant muur, valkenberg jens paris-roubaix. Meyrueis belleville cavendish bianchi, rochefort echelon in soigneur ten dam omloop het volk, bettini aerts! Tour de mont aigoual cat among the pigeons rekelberg omloop het nieuwsblad paris-nice, dwars door vlaanderen coppi the colnago knockteberg anduze.&lt;/p&gt;
-
-&lt;p&gt;Kaperij lanterne rouge musette rund um koln bruges thor smash, geraardsbergen riis petacchi molteni pedaling squares. Virenque vande velde, valkenberg gutter pantani parcours gaul domestique, tilford campagnolo around madone. Bruyneel criterium ritte, gorgeous george the trousselier feed zone bruges nokere koerse, parcours gilbert garin? Anquetil valkenberg bettini cat among the pigeons.&lt;/p&gt;
-
-&lt;p&gt;Campagnolo the hors delai de wolf as the toto turns venga venga venga, sanchez nys. Pantani hell of the north oude kwaremont nitto koppenberg, tiegemberg van steenbergen lombardie flamme rouge lemond e3 prijs vlaanderen.&lt;/p&gt;
-
-&lt;p&gt;Planckaert berg ter stene freire gorgeous george in rouleur derby, vaughters fabianese omloop het volk rouleur play rouleur derby. Bottechia petacchi, milan-san remo van summeren off the back cutters the cassette.&lt;/p&gt;
-
-&lt;p&gt;Nyvelocity pyrenees vande velde merckx. La fleche wallonne fixie pau, with muur hors categorie boonen aerts operacion puerto, topsport vlaanderen pereiro randonneur. This greek text is produced by rouleur derby, almost certainly the best fantasy cycling game in the world snob trousselier col du galibier, flanders venga venga venga suitcase of courage cutters kolobnev molenberg.&lt;/p&gt;
-</description><description>&lt;p class=&quot;intro&quot;&gt;&lt;span class=&quot;dropcap&quot;&gt;L&lt;/span&gt;orem ipsum thor smash liege-bastogne-liege landbouwkrediet ombregt krabbe, rouleur derby is for lovers bonk giro gilbert bidon. Driedaagse de panne-koksijde monte paschi eroica, nevele gimondi berendries off the back cassette tenbosse.&lt;/p&gt;
-
-</description><pubDate>Wed, 10 Dec 2014 00:00:00 +0000</pubDate>
-        <link>https://avocado-planet.github.io/blog/test-post/</link>
-        <guid isPermaLink="true">https://avocado-planet.github.io/blog/test-post/</guid></item></channel>
+        <guid isPermaLink="true">https://avocado-planet.github.io/blog/image-in-post/</guid></item></channel>
 </rss>
