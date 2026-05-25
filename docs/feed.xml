@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title>Long Haul</title>
-    <description>Long Form Jekyll theme built with SASS</description>
+    <title>Avocado Planet</title>
+    <description>Tech blog on AI, ServiceNow, and cloud engineering</description>
     <link>https://avocado-planet.github.io/</link>
     <atom:link href="https://avocado-planet.github.io/feed.xml" rel="self" type="application/rss+xml"/>
-    <pubDate>Mon, 25 May 2026 13:15:01 +0000</pubDate>
-    <lastBuildDate>Mon, 25 May 2026 13:15:01 +0000</lastBuildDate>
+    <pubDate>Mon, 25 May 2026 13:23:22 +0000</pubDate>
+    <lastBuildDate>Mon, 25 May 2026 13:23:22 +0000</lastBuildDate>
     <generator>Jekyll v3.10.0</generator><item>
         <title>LangChainのメモリ（会話履歴）完全ガイド — レガシーからLangGraphへ</title>
         <description>&lt;p&gt;LLMは本質的にステートレスです。&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;invoke()&lt;/code&gt; を呼ぶたびに、前のやり取りは一切覚えていません。チャットボットや対話型エージェントを作るには、&lt;strong&gt;会話履歴をどう保持するか&lt;/strong&gt;が設計上の重要な判断ポイントになります。&lt;/p&gt;
