@@ -7,3 +7,4 @@ title: About
 	<h1 class="pageTitle">About</h1>
 	<p>編集中です。</p>
 </div>
+
