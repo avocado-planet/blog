@@ -1,7 +1,7 @@
 ---
 layout: post
 title:  "MCPアーキテクチャ深掘り：Host-Client-Server構造、3つのプリミティブ、処理シーケンス"
-date:   2026-05-29
+date:   2026-05-28
 description: MCPのHost-Client-Server 3層構造、Tools/Resources/Promptsの3つのプリミティブ、Anthropic Academy教材をベースにしたエンドツーエンドの処理シーケンスを整理する
 ---
 
