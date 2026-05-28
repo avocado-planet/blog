@@ -5,9 +5,498 @@
     <description>Tech blog on AI, ServiceNow, and cloud engineering</description>
     <link>https://avocado-planet.github.io/</link>
     <atom:link href="https://avocado-planet.github.io/feed.xml" rel="self" type="application/rss+xml"/>
-    <pubDate>Thu, 28 May 2026 14:29:52 +0000</pubDate>
-    <lastBuildDate>Thu, 28 May 2026 14:29:52 +0000</lastBuildDate>
+    <pubDate>Thu, 28 May 2026 14:34:02 +0000</pubDate>
+    <lastBuildDate>Thu, 28 May 2026 14:34:02 +0000</lastBuildDate>
     <generator>Jekyll v3.10.0</generator><item>
+        <title>MCPアーキテクチャ深掘り：Host-Client-Server構造、3つのプリミティブ、処理シーケンス</title>
+        <description>&lt;p&gt;前回の記事（&lt;a href=&quot;https://avocado-planet.github.io/blog/blog/mcp-stdio-sse-dataflow/&quot;&gt;MCPの仕組みを理解する：SSE・Stdio通信からLLMとのデータフローまで&lt;/a&gt;）では、MCPの通信方式（SSE/Stdio）、JSON-RPCの流れ、LLMとのデータフロー、プロセスのライフサイクルを整理した。&lt;/p&gt;
+
+&lt;p&gt;今回は &lt;strong&gt;その上位レイヤー&lt;/strong&gt; にフォーカスする。MCPのアーキテクチャ設計（Host / Client / Server の役割分担）、サーバーが公開する3つのプリミティブ（Tools / Resources / Prompts）、そしてAnthropicの公式教材に基づくエンドツーエンドの処理シーケンスを詳しく見ていく。&lt;/p&gt;
+
+&lt;p&gt;前回の記事と合わせて読むと、MCPの全体像が &lt;strong&gt;プロトコル層（前回）+ アーキテクチャ層（今回）&lt;/strong&gt; の両面から掴めるようになる。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;nm問題とmcpの位置づけ&quot;&gt;N×M問題とMCPの位置づけ&lt;/h2&gt;
+
+&lt;p&gt;AIアプリケーションが外部ツールにアクセスするには、従来はツールごとに個別のインテグレーションコードを書く必要があった。N個のAIアプリ × M個のツール = N×M個のカスタム実装が必要になる、いわゆる &lt;strong&gt;N×M問題&lt;/strong&gt; が存在していた。&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;【従来】                          【MCP導入後】
+AI App A ──独自実装──→ Tool 1     AI App A ─┐
+AI App A ──独自実装──→ Tool 2               ├── MCP ──→ Tool 1
+AI App B ──独自実装──→ Tool 1               ├── MCP ──→ Tool 2
+AI App B ──独自実装──→ Tool 2     AI App B ─┘         → Tool 3
+  (N×M個のカスタム実装)             (統一プロトコル)
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;HTTPがWeb通信を標準化したように、MCPはAIアプリとツール間の通信を標準化する。一度MCPサーバーを作れば、どのMCPホストからでも利用できる。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;host-client-server-3層アーキテクチャ&quot;&gt;Host-Client-Server 3層アーキテクチャ&lt;/h2&gt;
+
+&lt;p&gt;MCPは &lt;strong&gt;Host-Client-Server&lt;/strong&gt; の3つの役割で構成される。前回の記事では「クライアント」と「サーバー」の通信にフォーカスしたが、実はその上に &lt;strong&gt;Host&lt;/strong&gt; というレイヤーがある。&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;┌─────────────────────────────────────────────────────┐
+│                 MCP Host（例: Claude Desktop）         │
+│                                                       │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐          │
+│   │ Client 1 │  │ Client 2 │  │ Client 3 │   [LLM]  │
+│   └────┬─────┘  └────┬─────┘  └────┬─────┘          │
+│        │              │              │                │
+└────────┼──────────────┼──────────────┼────────────────┘
+         │              │              │
+   ┌─────▼─────┐ ┌─────▼─────┐ ┌─────▼─────┐
+   │ Server A  │ │ Server B  │ │ Server C  │
+   │ (Files)   │ │ (DB)      │ │ (Sentry)  │
+   │ [ローカル] │ │ [ローカル] │ │ [リモート] │
+   └─────┬─────┘ └─────┬─────┘ └─────┬─────┘
+         │              │              │
+    ローカル         ローカル       外部API
+    ファイル         データベース    (Internet)
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;h3 id=&quot;mcp-hostホスト&quot;&gt;MCP Host（ホスト）&lt;/h3&gt;
+
+&lt;p&gt;ユーザーが直接操作する &lt;strong&gt;AIアプリケーション本体&lt;/strong&gt;。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;Claude Desktop、Claude Code、VS Code（Copilot）、Cursor などが該当&lt;/li&gt;
+  &lt;li&gt;内部に1つ以上のMCP Clientを生成・管理する&lt;/li&gt;
+  &lt;li&gt;LLMの推論処理を統括し、ユーザーとのインタラクションを担当&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;セキュリティの門番&lt;/strong&gt;: どのClientがどのToolを呼べるかのアクセス制御を行う&lt;/li&gt;
+  &lt;li&gt;複数のMCP Serverから取得したコンテキストを &lt;strong&gt;集約&lt;/strong&gt; してLLMに渡す&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h3 id=&quot;mcp-clientクライアント&quot;&gt;MCP Client（クライアント）&lt;/h3&gt;
+
+&lt;p&gt;Host内部に存在する &lt;strong&gt;通信コンポーネント&lt;/strong&gt;。各MCP Serverとの1:1接続を維持する。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;HostがMCP Serverに接続するたびに、専用のClientインスタンスが1つ生成される&lt;/li&gt;
+  &lt;li&gt;ServerとのJSON-RPCセッションを管理（初期化、ケーパビリティネゴシエーション、終了）&lt;/li&gt;
+  &lt;li&gt;Serverが公開するTools / Resources / Promptsを &lt;strong&gt;発見（discovery）&lt;/strong&gt; してHostに伝える&lt;/li&gt;
+  &lt;li&gt;LLMのリクエストをMCPプロトコルに変換し、Serverのレスポンスをホストに返す&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;前回の記事で &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;MultiServerMCPClient&lt;/code&gt; や &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;subprocess.Popen&lt;/code&gt; で接続していたのは、まさにこのClient層の操作に当たる。&lt;/p&gt;
+
+&lt;h3 id=&quot;mcp-serverサーバー&quot;&gt;MCP Server（サーバー）&lt;/h3&gt;
+
+&lt;p&gt;外部サービスやデータへのアクセスを &lt;strong&gt;MCPプロトコルで公開するプログラム&lt;/strong&gt;。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;ファイルシステム、データベース、GitHub、Slack、Sentry など、特定の機能に特化する&lt;/li&gt;
+  &lt;li&gt;Tools / Resources / Prompts の3つのプリミティブを通じて機能を公開する&lt;/li&gt;
+  &lt;li&gt;ローカル実行（STDIO）もリモート実行（Streamable HTTP）も可能&lt;/li&gt;
+  &lt;li&gt;1つのServerは1つの統合ポイントに集中するのがベストプラクティス&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h3 id=&quot;具体例-vs-code--sentry--filesystem&quot;&gt;具体例: VS Code + Sentry + Filesystem&lt;/h3&gt;
+
+&lt;p&gt;VS CodeがMCP Hostとして動作する場合を考える。&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;VS CodeがSentry MCP Serverに接続 → &lt;strong&gt;Client 1&lt;/strong&gt; が生成され、Sentryとの接続を維持&lt;/li&gt;
+  &lt;li&gt;VS Codeがローカルファイルシステム Serverに接続 → &lt;strong&gt;Client 2&lt;/strong&gt; が生成される&lt;/li&gt;
+  &lt;li&gt;VS Code内のLLMが「このエラーの詳細を見て」と判断 → Client 1経由でSentryのToolを呼ぶ&lt;/li&gt;
+  &lt;li&gt;LLMが「関連ファイルを開いて」と判断 → Client 2経由でファイルシステムのToolを呼ぶ&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;&lt;strong&gt;各Clientは独立したセッションを持つ&lt;/strong&gt;ため、Sentryの権限でファイルシステムにアクセスすることはできない。これがセキュリティの分離を実現している。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;3つのプリミティブ-tools--resources--prompts&quot;&gt;3つのプリミティブ: Tools / Resources / Prompts&lt;/h2&gt;
+
+&lt;p&gt;MCP Serverは3種類のプリミティブを通じて機能を公開する。前回の記事ではToolsの呼び出しフローを詳しく見たが、実はToolsはプリミティブの1つに過ぎない。&lt;/p&gt;
+
+&lt;p&gt;これらは &lt;strong&gt;「誰がいつ使うかを決めるか」&lt;/strong&gt; で区別される。&lt;/p&gt;
+
+&lt;h3 id=&quot;tools--モデル制御&quot;&gt;Tools — モデル制御&lt;/h3&gt;
+
+&lt;p&gt;LLMが &lt;strong&gt;自律的に判断して呼び出す&lt;/strong&gt; 実行可能な関数。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;副作用のあるアクション（レコード作成、メッセージ送信、デプロイ等）に適する&lt;/li&gt;
+  &lt;li&gt;JSON Schemaで入力パラメータを定義する&lt;/li&gt;
+  &lt;li&gt;実行前にユーザーの同意を求めることが可能&lt;/li&gt;
+  &lt;li&gt;例: &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;query_database&lt;/code&gt;, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;create_issue&lt;/code&gt;, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;send_slack_message&lt;/code&gt;&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;ユーザー: 「Tokyoの天気を教えて」
+   ↓
+LLM: 「weather_apiツールを呼ぶべきだ」 ← モデルが自分で判断
+   ↓
+Tool実行 → 結果をLLMに返す → ユーザーに回答
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;前回の記事で解説した &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tools/call&lt;/code&gt; → ReActループは、まさにこのToolsプリミティブの動作フローだ。&lt;/p&gt;
+
+&lt;h3 id=&quot;resources--アプリケーション制御&quot;&gt;Resources — アプリケーション制御&lt;/h3&gt;
+
+&lt;p&gt;読み取り専用のデータソース。&lt;strong&gt;HostアプリケーションやClient側&lt;/strong&gt; がいつ取得するかを決める。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;ファイル内容、DBスキーマ、設定情報、ナレッジベースなどを公開&lt;/li&gt;
+  &lt;li&gt;LLMが直接要求するのではなく、ClientがResourceを取得してLLMのコンテキストに注入する&lt;/li&gt;
+  &lt;li&gt;URIで識別される（例: &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;file:///project/schema.sql&lt;/code&gt;）&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;Client: 「DBスキーマのResourceを先に取得しておこう」
+   ↓
+Resource取得 → LLMのコンテキストに追加
+   ↓
+LLM: スキーマを理解した上でSQLクエリを生成
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;Toolsとの大きな違いは、&lt;strong&gt;LLMが「呼ぶ」のではなく、アプリ側が「先に渡す」&lt;/strong&gt; こと。前回の記事の &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;get_tools()&lt;/code&gt; が「準備フェーズ」だったのと同じ考え方で、Resourcesも事前にコンテキストとして仕込む。&lt;/p&gt;
+
+&lt;h3 id=&quot;prompts--ユーザー制御&quot;&gt;Prompts — ユーザー制御&lt;/h3&gt;
+
+&lt;p&gt;再利用可能なインタラクションテンプレート。&lt;strong&gt;ユーザーがUI上で明示的に選択&lt;/strong&gt; して起動する。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;コードレビュー手順、セキュリティ監査チェックリストなどのワークフローを定義&lt;/li&gt;
+  &lt;li&gt;引数を受け取ってメッセージ列に展開される&lt;/li&gt;
+  &lt;li&gt;ドメイン知識を標準化されたパターンとして封じ込める&lt;/li&gt;
+  &lt;li&gt;例: &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;code_review(code)&lt;/code&gt;, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;security_audit(target)&lt;/code&gt;, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;explain_concept(topic)&lt;/code&gt;&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;ユーザー: UIから「コードレビュー」プロンプトを選択
+   ↓
+Client: Serverからプロンプトテンプレートを取得
+   ↓
+引数を埋めてLLMに送信 → 構造化されたレビュー結果
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;h3 id=&quot;プリミティブ比較表&quot;&gt;プリミティブ比較表&lt;/h3&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;特性&lt;/th&gt;
+      &lt;th&gt;Tools&lt;/th&gt;
+      &lt;th&gt;Resources&lt;/th&gt;
+      &lt;th&gt;Prompts&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;制御主体&lt;/td&gt;
+      &lt;td&gt;モデル（LLM）&lt;/td&gt;
+      &lt;td&gt;アプリケーション（Client/Host）&lt;/td&gt;
+      &lt;td&gt;ユーザー&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;目的&lt;/td&gt;
+      &lt;td&gt;アクション実行&lt;/td&gt;
+      &lt;td&gt;コンテキストデータ提供&lt;/td&gt;
+      &lt;td&gt;インタラクションの構造化&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;副作用&lt;/td&gt;
+      &lt;td&gt;あり（変更操作含む）&lt;/td&gt;
+      &lt;td&gt;なし（読み取り専用）&lt;/td&gt;
+      &lt;td&gt;なし（テンプレート展開のみ）&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;発見方法&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tools/list&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;resources/list&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;prompts/list&lt;/code&gt;&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;実行/取得&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tools/call&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;resources/read&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;prompts/get&lt;/code&gt;&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;処理シーケンス--anthropic-academy教材ベース&quot;&gt;処理シーケンス — Anthropic Academy教材ベース&lt;/h2&gt;
+
+&lt;p&gt;Anthropic Academyの「Claude with Amazon Bedrock」コースのMCPモジュールでは、MCPの処理フローを6つのアクターで表現している。以下はその教材のシーケンス図を元に整理したもの。&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/blog/assets/img/mcp-sequence-diagram.png&quot; alt=&quot;MCP Sequence Diagram&quot; /&gt;&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;  User      Our Server    MCP Client    MCP Server     Claude       GitHub
+   │             │              │              │           │            │
+   │ &quot;What       │              │              │           │            │
+   │ repositories│              │              │           │            │
+   │ do I have?&quot; │              │              │           │            │
+   ├────────────→│              │              │           │            │
+   │             │              │              │           │            │
+   │             │ I need a list│              │           │            │
+   │             │ of tools to  │              │           │            │
+   │             │ send to Claude              │           │            │
+   │             ├─────────────→│              │           │            │
+   │             │              │              │           │            │
+   │             │              │ [ListToolsRequest]       │            │
+   │             │              ├─────────────→│           │            │
+   │             │              │              │           │            │
+   │             │ Here are     │ [ListToolsResult]        │            │
+   │             │ the tools    │←─────────────┤           │            │
+   │             │              │              │           │            │
+   │             │ [Query + Tools]              │           │            │
+   │             ├─────────────────────────────────────────→│            │
+   │             │              │              │           │            │
+   │             │              │              │ [ToolUse]  │            │
+   │             │←────────────────────────────────────────┤            │
+   │             │              │              │           │            │
+   │             │ Please run   │ [CallToolRequest]        │            │
+   │             │ this tool    │              │           │            │
+   │             ├─────────────→├─────────────→│           │            │
+   │             │              │              │  Request to GitHub     │
+   │             │              │              ├──────────────────────→ │
+   │             │              │              │           │            │
+   │             │              │              │           │  Response  │
+   │             │              │              │←─────────────────────┤
+   │             │              │              │           │            │
+   │             │ Here&apos;s the   │ [CallToolResult]         │            │
+   │             │ result of    │←─────────────┤           │            │
+   │             │ running tool │              │           │            │
+   │             │              │              │           │            │
+   │             │ [toolResult] │              │           │            │
+   │             │←─────────────┤              │           │            │
+   │             │              │              │           │            │
+   │             ├─────────────────────────────────────────→│            │
+   │             │←────────────────────────────────────────┤            │
+   │             │              │              │           │            │
+   │ &quot;Your       │              │              │           │            │
+   │ repositories│              │              │           │            │
+   │ are...&quot;     │              │              │           │            │
+   │←────────────┤              │              │           │            │
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;h3 id=&quot;4フェーズの解説&quot;&gt;4フェーズの解説&lt;/h3&gt;
+
+&lt;p&gt;このフローは &lt;strong&gt;フェーズA（ツール発見）→ B（LLM推論）→ C（ツール実行）→ D（回答生成）&lt;/strong&gt; の4段階に分かれる。&lt;/p&gt;
+
+&lt;h4 id=&quot;フェーズa-ツール発見tool-discovery&quot;&gt;フェーズA: ツール発見（Tool Discovery）&lt;/h4&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;ユーザーが「What repositories do I have?」と質問&lt;/li&gt;
+  &lt;li&gt;Our Server が MCP Client にツール一覧を要求&lt;/li&gt;
+  &lt;li&gt;MCP Client が MCP Server に &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ListToolsRequest&lt;/code&gt; を送信&lt;/li&gt;
+  &lt;li&gt;MCP Server が &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ListToolsResult&lt;/code&gt; で利用可能なツール（名前、説明、パラメータスキーマ）を返す&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;前回の記事の &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;get_tools()&lt;/code&gt; に相当するフェーズ。&lt;/p&gt;
+
+&lt;h4 id=&quot;フェーズb-llm推論llm-reasoning&quot;&gt;フェーズB: LLM推論（LLM Reasoning）&lt;/h4&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;Our Server が Claude に &lt;strong&gt;ユーザーの質問 + ツール定義&lt;/strong&gt; をまとめて送信（&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Query + Tools&lt;/code&gt;）&lt;/li&gt;
+  &lt;li&gt;Claude が &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ToolUse&lt;/code&gt; を返す — 「&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;list_repositories&lt;/code&gt; ツールを呼ぶべきだ」と自律的に判断&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;前回の記事の &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ainvoke()&lt;/code&gt; → ReActループの「ツール選択」に相当する。&lt;/p&gt;
+
+&lt;h4 id=&quot;フェーズc-ツール実行tool-execution&quot;&gt;フェーズC: ツール実行（Tool Execution）&lt;/h4&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;Our Server が MCP Client にツール実行を依頼&lt;/li&gt;
+  &lt;li&gt;MCP Client が MCP Server に &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;CallToolRequest&lt;/code&gt; を送信&lt;/li&gt;
+  &lt;li&gt;MCP Server が実際のGitHub APIを呼び出す&lt;/li&gt;
+  &lt;li&gt;GitHub がレスポンスを返す&lt;/li&gt;
+  &lt;li&gt;MCP Server が &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;CallToolResult&lt;/code&gt; で結果を返す&lt;/li&gt;
+  &lt;li&gt;MCP Client が Our Server に &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;toolResult&lt;/code&gt; を返す&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;前回の記事の &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tools/call&lt;/code&gt; → JSON-RPCのやり取りがこのフェーズに当たる。&lt;/p&gt;
+
+&lt;h4 id=&quot;フェーズd-回答生成response-generation&quot;&gt;フェーズD: 回答生成（Response Generation）&lt;/h4&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;Our Server がツール結果を Claude に送信&lt;/li&gt;
+  &lt;li&gt;Claude が自然言語で「Your repositories are…」と回答を生成&lt;/li&gt;
+  &lt;li&gt;ユーザーに最終回答を表示&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;h3 id=&quot;mcpプロトコルメッセージ一覧&quot;&gt;MCPプロトコルメッセージ一覧&lt;/h3&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;メッセージ&lt;/th&gt;
+      &lt;th&gt;方向&lt;/th&gt;
+      &lt;th&gt;役割&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ListToolsRequest&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;Client → Server&lt;/td&gt;
+      &lt;td&gt;サーバーが公開する全ツールの一覧を要求&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ListToolsResult&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;Server → Client&lt;/td&gt;
+      &lt;td&gt;ツール名・説明・引数スキーマの一覧を返却&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Query + Tools&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;Our Server → Claude&lt;/td&gt;
+      &lt;td&gt;ユーザーの質問 + ツール定義をLLMに提示&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ToolUse&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;Claude → Our Server&lt;/td&gt;
+      &lt;td&gt;LLMが選んだツール名と引数&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;CallToolRequest&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;Client → Server&lt;/td&gt;
+      &lt;td&gt;指定ツールを指定引数で実行するリクエスト&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;CallToolResult&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;Server → Client&lt;/td&gt;
+      &lt;td&gt;ツール実行結果&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;toolResult&lt;/code&gt;&lt;/td&gt;
+      &lt;td&gt;Client → Our Server&lt;/td&gt;
+      &lt;td&gt;実行結果をアプリケーション側に返す&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;このフローで重要なのは、&lt;strong&gt;Claudeはツールの「選択と引数の決定」だけを行い、実際の実行はMCP Server側で行われる&lt;/strong&gt; という責務の分離。LLMは外部APIに直接アクセスせず、MCPプロトコルを介した安全な間接アクセスとなっている。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;発展トピック&quot;&gt;発展トピック&lt;/h2&gt;
+
+&lt;h3 id=&quot;sampling--サーバーからllmへの逆方向リクエスト&quot;&gt;Sampling — サーバーからLLMへの逆方向リクエスト&lt;/h3&gt;
+
+&lt;p&gt;通常はClient→Serverの方向だが、&lt;strong&gt;Serverが逆にHostのLLMを使いたい&lt;/strong&gt;ケースがある。Samplingプリミティブにより、Serverが &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;sampling/createMessage&lt;/code&gt; でLLMの推論結果を受け取れる。MCPサーバー側にLLM SDKを組み込まなくてもモデルの能力を利用できる仕組み。&lt;/p&gt;
+
+&lt;h3 id=&quot;elicitation--ユーザーへの問いかけ&quot;&gt;Elicitation — ユーザーへの問いかけ&lt;/h3&gt;
+
+&lt;p&gt;Serverが処理中に追加情報が必要になった場合、&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;elicitation/create&lt;/code&gt; でユーザーに質問を投げることができる。たとえば「デプロイ先の環境を選んでください」のような確認ダイアログを出す用途。&lt;/p&gt;
+
+&lt;h3 id=&quot;notifications--リアルタイム通知&quot;&gt;Notifications — リアルタイム通知&lt;/h3&gt;
+
+&lt;p&gt;ServerのToolリストが変更された場合など、Server→Clientへリアルタイムに通知を送れる。JSON-RPC 2.0のNotification（レスポンス不要のメッセージ）として実装される。&lt;/p&gt;
+
+&lt;h3 id=&quot;mcpとfunction-callingの違い&quot;&gt;MCPとFunction Callingの違い&lt;/h3&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;観点&lt;/th&gt;
+      &lt;th&gt;MCP&lt;/th&gt;
+      &lt;th&gt;Function Calling (API直接)&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;標準化&lt;/td&gt;
+      &lt;td&gt;オープンプロトコル&lt;/td&gt;
+      &lt;td&gt;ベンダー固有のAPI仕様&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;ツール発見&lt;/td&gt;
+      &lt;td&gt;動的（&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tools/list&lt;/code&gt;で実行時に発見）&lt;/td&gt;
+      &lt;td&gt;静的（API呼び出し時に定義を渡す）&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;ステート管理&lt;/td&gt;
+      &lt;td&gt;ステートフルセッション&lt;/td&gt;
+      &lt;td&gt;ステートレス&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;複数ツール接続&lt;/td&gt;
+      &lt;td&gt;Host内で複数Serverを並列管理&lt;/td&gt;
+      &lt;td&gt;開発者が個別に管理&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;再利用性&lt;/td&gt;
+      &lt;td&gt;Serverを一度作れば、どのHostからも利用可能&lt;/td&gt;
+      &lt;td&gt;アプリごとに再実装が必要&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;h3 id=&quot;セキュリティモデル&quot;&gt;セキュリティモデル&lt;/h3&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;&lt;strong&gt;セッション分離&lt;/strong&gt;: 各Client-Serverペアが独立したセッションを持ち、権限やデータが他のセッションに漏れない&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;Hostがゲートキーパー&lt;/strong&gt;: どのClientがどのToolを呼べるかはHostが制御する&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;ユーザー同意&lt;/strong&gt;: Tool実行前にユーザーの承認を求めるフローをサポート&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;トランスポートセキュリティ&lt;/strong&gt;: リモート通信はHTTPS必須、OAuth等の認証に対応&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;まとめ&quot;&gt;まとめ&lt;/h2&gt;
+
+&lt;p&gt;前回の記事と今回の記事で、MCPの全体像を &lt;strong&gt;2つの視点&lt;/strong&gt; からカバーした。&lt;/p&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;視点&lt;/th&gt;
+      &lt;th&gt;前回の記事&lt;/th&gt;
+      &lt;th&gt;今回の記事&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;通信プロトコル&lt;/td&gt;
+      &lt;td&gt;SSE / Stdio / JSON-RPC&lt;/td&gt;
+      &lt;td&gt;— （前回参照）&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;データフロー&lt;/td&gt;
+      &lt;td&gt;get_tools → ainvoke → ReAct&lt;/td&gt;
+      &lt;td&gt;— （前回参照）&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;アーキテクチャ&lt;/td&gt;
+      &lt;td&gt;—&lt;/td&gt;
+      &lt;td&gt;Host / Client / Server 3層構造&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;プリミティブ&lt;/td&gt;
+      &lt;td&gt;—&lt;/td&gt;
+      &lt;td&gt;Tools / Resources / Prompts&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;処理シーケンス&lt;/td&gt;
+      &lt;td&gt;JSON-RPCメッセージ視点&lt;/td&gt;
+      &lt;td&gt;6アクター視点（Anthropic Academy準拠）&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;ライフサイクル&lt;/td&gt;
+      &lt;td&gt;LangChain / Claude.ai のプロセス管理&lt;/td&gt;
+      &lt;td&gt;— （前回参照）&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;発展トピック&lt;/td&gt;
+      &lt;td&gt;—&lt;/td&gt;
+      &lt;td&gt;Sampling / Elicitation / セキュリティ&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;MCPを理解するための3つの軸:&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;&lt;strong&gt;アーキテクチャ&lt;/strong&gt;: Host → Client → Server の3層構造。Hostが全体を統括し、Clientが1:1でServerと接続する&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;プリミティブ&lt;/strong&gt;: Tools（モデルが呼ぶ）、Resources（アプリが取得する）、Prompts（ユーザーが選ぶ）の3種類&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;プロトコル&lt;/strong&gt;: JSON-RPC 2.0ベースのステートフルセッション。STDIOとStreamable HTTPの2つのトランスポートを選択可能&lt;/li&gt;
+&lt;/ol&gt;
+</description><description>&lt;p&gt;前回の記事（&lt;a href=&quot;https://avocado-planet.github.io/blog/blog/mcp-stdio-sse-dataflow/&quot;&gt;MCPの仕組みを理解する：SSE・Stdio通信からLLMとのデータフローまで&lt;/a&gt;）では、MCPの通信方式（SSE/Stdio）、JSON-RPCの流れ、LLMとのデータフロー、プロセスのライフサイクルを整理した。&lt;/p&gt;
+
+</description><pubDate>Thu, 28 May 2026 00:00:00 +0000</pubDate>
+        <link>https://avocado-planet.github.io/blog/mcp-architecture-deep-dive/</link>
+        <guid isPermaLink="true">https://avocado-planet.github.io/blog/mcp-architecture-deep-dive/</guid></item><item>
         <title>LangChainのメモリ（会話履歴）完全ガイド — レガシーからLangGraphへ</title>
         <description>&lt;p&gt;LLMは本質的にステートレスです。&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;invoke()&lt;/code&gt; を呼ぶたびに、前のやり取りは一切覚えていません。チャットボットや対話型エージェントを作るには、&lt;strong&gt;会話履歴をどう保持するか&lt;/strong&gt;が設計上の重要な判断ポイントになります。&lt;/p&gt;
 

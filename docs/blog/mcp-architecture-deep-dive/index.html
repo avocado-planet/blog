@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<!--[if lt IE 7]><html class="no-js lt-ie9 lt-ie8 lt-ie7"><![endif]-->
+<!--[if IE 7]><html class="no-js lt-ie9 lt-ie8" <![endif]-->
+<!--[if IE 8]><html class="no-js lt-ie9" <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js"> <!--<![endif]--><head>
+	<meta charset="utf-8" />
+	<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<meta name="description" content="" />
+	<title>MCPアーキテクチャ深掘り：Host-Client-Server構造、3つのプリミティブ、処理シーケンス</title>
+
+	<!-- Open Graph Meta -->
+	<meta content="Avocado Planet" property="og:site_name" /><meta content="MCPアーキテクチャ深掘り：Host-Client-Server構造、3つのプリミティブ、処理シーケンス" property="og:title" /><meta content="article" property="og:type" /><meta content="MCPのHost-Client-Server 3層構造、Tools/Resources/Promptsの3つのプリミティブ、Anthropic Academy教材をベースにしたエンドツーエンドの処理シーケンスを整理する" property="og:description" /><meta content="https://avocado-planet.github.io/blog/blog/mcp-architecture-deep-dive/" property="og:url" /><meta
+		content="2026-05-28T00:00:00+00:00"
+		property="article:published_time"
+	/>
+	<meta content="https://avocado-planet.github.io/blog/about/" property="article:author" /><meta
+		content="https://avocado-planet.github.io/blog/assets/img/touring.jpg"
+		property="og:image"
+	/><!-- Twitter Cards -->
+	<meta name="twitter:card" content="summary" />
+	<meta name="twitter:site" content="@" />
+	<meta name="twitter:creator" content="@" /><meta name="twitter:title" content="MCPアーキテクチャ深掘り：Host-Client-Server構造、3つのプリミティブ、処理シーケンス" /><meta name="twitter:url" content="https://avocado-planet.github.io/blog/blog/mcp-architecture-deep-dive/" /><meta name="twitter:description" content="MCPのHost-Client-Server 3層構造、Tools/Resources/Promptsの3つのプリミティブ、Anthropic Academy教材をベースにしたエンドツーエンドの処理シーケンスを整理する" /><meta
+		name="twitter:image:src"
+		content="https://avocado-planet.github.io/blog/assets/img/touring.jpg"
+	/><!-- Favicon -->
+	<link rel="icon" type="image/x-icon" href=""/>
+
+	<!-- Come and get me RSS readers -->
+	<link rel="alternate" type="application/rss+xml" title="Avocado Planet"
+	href="https://avocado-planet.github.io/blog/feed.xml" />
+
+	<!-- Stylesheet -->
+	<link rel="stylesheet" href="/blog/assets/css/style.css" />
+
+	<!-- Canonical URL -->
+	<link
+		rel="canonical"
+		href="https://avocado-planet.github.io/blog/blog/mcp-architecture-deep-dive/"
+	/></head>
+<body> <div class="header ">
+     <div class="container">
+         <h1 class="logo"><a href="/blog/">Avocado Planet</a></h1>
+         <nav class="nav-collapse">
+             <ul class="noList"><li class="elementfirst">
+                     <a href="/blog/index.html">Home</a>
+                 </li><li class="elementlast">
+                     <a href="/blog/about">About</a>
+                 </li><li> <a href="https://github.com/avocado-planet/" target="_blank">GitHub</a></li>
+             </ul>
+         </nav>
+     </div>
+ </div><!-- end .header -->
+<div class="content">
+      <div class="container">
+         <article class="post"><header>
+    <h1 class="postTitle">MCPアーキテクチャ深掘り：Host-Client-Server構造、3つのプリミティブ、処理シーケンス</h1>
+    <p class="meta">May 28, 2026 | <span class="time">6</span> Minute Read</p>
+  </header>
+
+  <p>前回の記事（<a href="https://avocado-planet.github.io/blog/blog/mcp-stdio-sse-dataflow/">MCPの仕組みを理解する：SSE・Stdio通信からLLMとのデータフローまで</a>）では、MCPの通信方式（SSE/Stdio）、JSON-RPCの流れ、LLMとのデータフロー、プロセスのライフサイクルを整理した。</p>
+
+<p>今回は <strong>その上位レイヤー</strong> にフォーカスする。MCPのアーキテクチャ設計（Host / Client / Server の役割分担）、サーバーが公開する3つのプリミティブ（Tools / Resources / Prompts）、そしてAnthropicの公式教材に基づくエンドツーエンドの処理シーケンスを詳しく見ていく。</p>
+
+<p>前回の記事と合わせて読むと、MCPの全体像が <strong>プロトコル層（前回）+ アーキテクチャ層（今回）</strong> の両面から掴めるようになる。</p>
+
+<hr />
+
+<h2 id="nm問題とmcpの位置づけ">N×M問題とMCPの位置づけ</h2>
+
+<p>AIアプリケーションが外部ツールにアクセスするには、従来はツールごとに個別のインテグレーションコードを書く必要があった。N個のAIアプリ × M個のツール = N×M個のカスタム実装が必要になる、いわゆる <strong>N×M問題</strong> が存在していた。</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>【従来】                          【MCP導入後】
+AI App A ──独自実装──→ Tool 1     AI App A ─┐
+AI App A ──独自実装──→ Tool 2               ├── MCP ──→ Tool 1
+AI App B ──独自実装──→ Tool 1               ├── MCP ──→ Tool 2
+AI App B ──独自実装──→ Tool 2     AI App B ─┘         → Tool 3
+  (N×M個のカスタム実装)             (統一プロトコル)
+</code></pre></div></div>
+
+<p>HTTPがWeb通信を標準化したように、MCPはAIアプリとツール間の通信を標準化する。一度MCPサーバーを作れば、どのMCPホストからでも利用できる。</p>
+
+<hr />
+
+<h2 id="host-client-server-3層アーキテクチャ">Host-Client-Server 3層アーキテクチャ</h2>
+
+<p>MCPは <strong>Host-Client-Server</strong> の3つの役割で構成される。前回の記事では「クライアント」と「サーバー」の通信にフォーカスしたが、実はその上に <strong>Host</strong> というレイヤーがある。</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>┌─────────────────────────────────────────────────────┐
+│                 MCP Host（例: Claude Desktop）         │
+│                                                       │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐          │
+│   │ Client 1 │  │ Client 2 │  │ Client 3 │   [LLM]  │
+│   └────┬─────┘  └────┬─────┘  └────┬─────┘          │
+│        │              │              │                │
+└────────┼──────────────┼──────────────┼────────────────┘
+         │              │              │
+   ┌─────▼─────┐ ┌─────▼─────┐ ┌─────▼─────┐
+   │ Server A  │ │ Server B  │ │ Server C  │
+   │ (Files)   │ │ (DB)      │ │ (Sentry)  │
+   │ [ローカル] │ │ [ローカル] │ │ [リモート] │
+   └─────┬─────┘ └─────┬─────┘ └─────┬─────┘
+         │              │              │
+    ローカル         ローカル       外部API
+    ファイル         データベース    (Internet)
+</code></pre></div></div>
+
+<h3 id="mcp-hostホスト">MCP Host（ホスト）</h3>
+
+<p>ユーザーが直接操作する <strong>AIアプリケーション本体</strong>。</p>
+
+<ul>
+  <li>Claude Desktop、Claude Code、VS Code（Copilot）、Cursor などが該当</li>
+  <li>内部に1つ以上のMCP Clientを生成・管理する</li>
+  <li>LLMの推論処理を統括し、ユーザーとのインタラクションを担当</li>
+  <li><strong>セキュリティの門番</strong>: どのClientがどのToolを呼べるかのアクセス制御を行う</li>
+  <li>複数のMCP Serverから取得したコンテキストを <strong>集約</strong> してLLMに渡す</li>
+</ul>
+
+<h3 id="mcp-clientクライアント">MCP Client（クライアント）</h3>
+
+<p>Host内部に存在する <strong>通信コンポーネント</strong>。各MCP Serverとの1:1接続を維持する。</p>
+
+<ul>
+  <li>HostがMCP Serverに接続するたびに、専用のClientインスタンスが1つ生成される</li>
+  <li>ServerとのJSON-RPCセッションを管理（初期化、ケーパビリティネゴシエーション、終了）</li>
+  <li>Serverが公開するTools / Resources / Promptsを <strong>発見（discovery）</strong> してHostに伝える</li>
+  <li>LLMのリクエストをMCPプロトコルに変換し、Serverのレスポンスをホストに返す</li>
+</ul>
+
+<p>前回の記事で <code class="language-plaintext highlighter-rouge">MultiServerMCPClient</code> や <code class="language-plaintext highlighter-rouge">subprocess.Popen</code> で接続していたのは、まさにこのClient層の操作に当たる。</p>
+
+<h3 id="mcp-serverサーバー">MCP Server（サーバー）</h3>
+
+<p>外部サービスやデータへのアクセスを <strong>MCPプロトコルで公開するプログラム</strong>。</p>
+
+<ul>
+  <li>ファイルシステム、データベース、GitHub、Slack、Sentry など、特定の機能に特化する</li>
+  <li>Tools / Resources / Prompts の3つのプリミティブを通じて機能を公開する</li>
+  <li>ローカル実行（STDIO）もリモート実行（Streamable HTTP）も可能</li>
+  <li>1つのServerは1つの統合ポイントに集中するのがベストプラクティス</li>
+</ul>
+
+<h3 id="具体例-vs-code--sentry--filesystem">具体例: VS Code + Sentry + Filesystem</h3>
+
+<p>VS CodeがMCP Hostとして動作する場合を考える。</p>
+
+<ol>
+  <li>VS CodeがSentry MCP Serverに接続 → <strong>Client 1</strong> が生成され、Sentryとの接続を維持</li>
+  <li>VS Codeがローカルファイルシステム Serverに接続 → <strong>Client 2</strong> が生成される</li>
+  <li>VS Code内のLLMが「このエラーの詳細を見て」と判断 → Client 1経由でSentryのToolを呼ぶ</li>
+  <li>LLMが「関連ファイルを開いて」と判断 → Client 2経由でファイルシステムのToolを呼ぶ</li>
+</ol>
+
+<p><strong>各Clientは独立したセッションを持つ</strong>ため、Sentryの権限でファイルシステムにアクセスすることはできない。これがセキュリティの分離を実現している。</p>
+
+<hr />
+
+<h2 id="3つのプリミティブ-tools--resources--prompts">3つのプリミティブ: Tools / Resources / Prompts</h2>
+
+<p>MCP Serverは3種類のプリミティブを通じて機能を公開する。前回の記事ではToolsの呼び出しフローを詳しく見たが、実はToolsはプリミティブの1つに過ぎない。</p>
+
+<p>これらは <strong>「誰がいつ使うかを決めるか」</strong> で区別される。</p>
+
+<h3 id="tools--モデル制御">Tools — モデル制御</h3>
+
+<p>LLMが <strong>自律的に判断して呼び出す</strong> 実行可能な関数。</p>
+
+<ul>
+  <li>副作用のあるアクション（レコード作成、メッセージ送信、デプロイ等）に適する</li>
+  <li>JSON Schemaで入力パラメータを定義する</li>
+  <li>実行前にユーザーの同意を求めることが可能</li>
+  <li>例: <code class="language-plaintext highlighter-rouge">query_database</code>, <code class="language-plaintext highlighter-rouge">create_issue</code>, <code class="language-plaintext highlighter-rouge">send_slack_message</code></li>
+</ul>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ユーザー: 「Tokyoの天気を教えて」
+   ↓
+LLM: 「weather_apiツールを呼ぶべきだ」 ← モデルが自分で判断
+   ↓
+Tool実行 → 結果をLLMに返す → ユーザーに回答
+</code></pre></div></div>
+
+<p>前回の記事で解説した <code class="language-plaintext highlighter-rouge">tools/call</code> → ReActループは、まさにこのToolsプリミティブの動作フローだ。</p>
+
+<h3 id="resources--アプリケーション制御">Resources — アプリケーション制御</h3>
+
+<p>読み取り専用のデータソース。<strong>HostアプリケーションやClient側</strong> がいつ取得するかを決める。</p>
+
+<ul>
+  <li>ファイル内容、DBスキーマ、設定情報、ナレッジベースなどを公開</li>
+  <li>LLMが直接要求するのではなく、ClientがResourceを取得してLLMのコンテキストに注入する</li>
+  <li>URIで識別される（例: <code class="language-plaintext highlighter-rouge">file:///project/schema.sql</code>）</li>
+</ul>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Client: 「DBスキーマのResourceを先に取得しておこう」
+   ↓
+Resource取得 → LLMのコンテキストに追加
+   ↓
+LLM: スキーマを理解した上でSQLクエリを生成
+</code></pre></div></div>
+
+<p>Toolsとの大きな違いは、<strong>LLMが「呼ぶ」のではなく、アプリ側が「先に渡す」</strong> こと。前回の記事の <code class="language-plaintext highlighter-rouge">get_tools()</code> が「準備フェーズ」だったのと同じ考え方で、Resourcesも事前にコンテキストとして仕込む。</p>
+
+<h3 id="prompts--ユーザー制御">Prompts — ユーザー制御</h3>
+
+<p>再利用可能なインタラクションテンプレート。<strong>ユーザーがUI上で明示的に選択</strong> して起動する。</p>
+
+<ul>
+  <li>コードレビュー手順、セキュリティ監査チェックリストなどのワークフローを定義</li>
+  <li>引数を受け取ってメッセージ列に展開される</li>
+  <li>ドメイン知識を標準化されたパターンとして封じ込める</li>
+  <li>例: <code class="language-plaintext highlighter-rouge">code_review(code)</code>, <code class="language-plaintext highlighter-rouge">security_audit(target)</code>, <code class="language-plaintext highlighter-rouge">explain_concept(topic)</code></li>
+</ul>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ユーザー: UIから「コードレビュー」プロンプトを選択
+   ↓
+Client: Serverからプロンプトテンプレートを取得
+   ↓
+引数を埋めてLLMに送信 → 構造化されたレビュー結果
+</code></pre></div></div>
+
+<h3 id="プリミティブ比較表">プリミティブ比較表</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>特性</th>
+      <th>Tools</th>
+      <th>Resources</th>
+      <th>Prompts</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>制御主体</td>
+      <td>モデル（LLM）</td>
+      <td>アプリケーション（Client/Host）</td>
+      <td>ユーザー</td>
+    </tr>
+    <tr>
+      <td>目的</td>
+      <td>アクション実行</td>
+      <td>コンテキストデータ提供</td>
+      <td>インタラクションの構造化</td>
+    </tr>
+    <tr>
+      <td>副作用</td>
+      <td>あり（変更操作含む）</td>
+      <td>なし（読み取り専用）</td>
+      <td>なし（テンプレート展開のみ）</td>
+    </tr>
+    <tr>
+      <td>発見方法</td>
+      <td><code class="language-plaintext highlighter-rouge">tools/list</code></td>
+      <td><code class="language-plaintext highlighter-rouge">resources/list</code></td>
+      <td><code class="language-plaintext highlighter-rouge">prompts/list</code></td>
+    </tr>
+    <tr>
+      <td>実行/取得</td>
+      <td><code class="language-plaintext highlighter-rouge">tools/call</code></td>
+      <td><code class="language-plaintext highlighter-rouge">resources/read</code></td>
+      <td><code class="language-plaintext highlighter-rouge">prompts/get</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2 id="処理シーケンス--anthropic-academy教材ベース">処理シーケンス — Anthropic Academy教材ベース</h2>
+
+<p>Anthropic Academyの「Claude with Amazon Bedrock」コースのMCPモジュールでは、MCPの処理フローを6つのアクターで表現している。以下はその教材のシーケンス図を元に整理したもの。</p>
+
+<p><img src="/blog/assets/img/mcp-sequence-diagram.png" alt="MCP Sequence Diagram" /></p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>  User      Our Server    MCP Client    MCP Server     Claude       GitHub
+   │             │              │              │           │            │
+   │ "What       │              │              │           │            │
+   │ repositories│              │              │           │            │
+   │ do I have?" │              │              │           │            │
+   ├────────────→│              │              │           │            │
+   │             │              │              │           │            │
+   │             │ I need a list│              │           │            │
+   │             │ of tools to  │              │           │            │
+   │             │ send to Claude              │           │            │
+   │             ├─────────────→│              │           │            │
+   │             │              │              │           │            │
+   │             │              │ [ListToolsRequest]       │            │
+   │             │              ├─────────────→│           │            │
+   │             │              │              │           │            │
+   │             │ Here are     │ [ListToolsResult]        │            │
+   │             │ the tools    │←─────────────┤           │            │
+   │             │              │              │           │            │
+   │             │ [Query + Tools]              │           │            │
+   │             ├─────────────────────────────────────────→│            │
+   │             │              │              │           │            │
+   │             │              │              │ [ToolUse]  │            │
+   │             │←────────────────────────────────────────┤            │
+   │             │              │              │           │            │
+   │             │ Please run   │ [CallToolRequest]        │            │
+   │             │ this tool    │              │           │            │
+   │             ├─────────────→├─────────────→│           │            │
+   │             │              │              │  Request to GitHub     │
+   │             │              │              ├──────────────────────→ │
+   │             │              │              │           │            │
+   │             │              │              │           │  Response  │
+   │             │              │              │←─────────────────────┤
+   │             │              │              │           │            │
+   │             │ Here's the   │ [CallToolResult]         │            │
+   │             │ result of    │←─────────────┤           │            │
+   │             │ running tool │              │           │            │
+   │             │              │              │           │            │
+   │             │ [toolResult] │              │           │            │
+   │             │←─────────────┤              │           │            │
+   │             │              │              │           │            │
+   │             ├─────────────────────────────────────────→│            │
+   │             │←────────────────────────────────────────┤            │
+   │             │              │              │           │            │
+   │ "Your       │              │              │           │            │
+   │ repositories│              │              │           │            │
+   │ are..."     │              │              │           │            │
+   │←────────────┤              │              │           │            │
+</code></pre></div></div>
+
+<h3 id="4フェーズの解説">4フェーズの解説</h3>
+
+<p>このフローは <strong>フェーズA（ツール発見）→ B（LLM推論）→ C（ツール実行）→ D（回答生成）</strong> の4段階に分かれる。</p>
+
+<h4 id="フェーズa-ツール発見tool-discovery">フェーズA: ツール発見（Tool Discovery）</h4>
+
+<ol>
+  <li>ユーザーが「What repositories do I have?」と質問</li>
+  <li>Our Server が MCP Client にツール一覧を要求</li>
+  <li>MCP Client が MCP Server に <code class="language-plaintext highlighter-rouge">ListToolsRequest</code> を送信</li>
+  <li>MCP Server が <code class="language-plaintext highlighter-rouge">ListToolsResult</code> で利用可能なツール（名前、説明、パラメータスキーマ）を返す</li>
+</ol>
+
+<p>前回の記事の <code class="language-plaintext highlighter-rouge">get_tools()</code> に相当するフェーズ。</p>
+
+<h4 id="フェーズb-llm推論llm-reasoning">フェーズB: LLM推論（LLM Reasoning）</h4>
+
+<ol>
+  <li>Our Server が Claude に <strong>ユーザーの質問 + ツール定義</strong> をまとめて送信（<code class="language-plaintext highlighter-rouge">Query + Tools</code>）</li>
+  <li>Claude が <code class="language-plaintext highlighter-rouge">ToolUse</code> を返す — 「<code class="language-plaintext highlighter-rouge">list_repositories</code> ツールを呼ぶべきだ」と自律的に判断</li>
+</ol>
+
+<p>前回の記事の <code class="language-plaintext highlighter-rouge">ainvoke()</code> → ReActループの「ツール選択」に相当する。</p>
+
+<h4 id="フェーズc-ツール実行tool-execution">フェーズC: ツール実行（Tool Execution）</h4>
+
+<ol>
+  <li>Our Server が MCP Client にツール実行を依頼</li>
+  <li>MCP Client が MCP Server に <code class="language-plaintext highlighter-rouge">CallToolRequest</code> を送信</li>
+  <li>MCP Server が実際のGitHub APIを呼び出す</li>
+  <li>GitHub がレスポンスを返す</li>
+  <li>MCP Server が <code class="language-plaintext highlighter-rouge">CallToolResult</code> で結果を返す</li>
+  <li>MCP Client が Our Server に <code class="language-plaintext highlighter-rouge">toolResult</code> を返す</li>
+</ol>
+
+<p>前回の記事の <code class="language-plaintext highlighter-rouge">tools/call</code> → JSON-RPCのやり取りがこのフェーズに当たる。</p>
+
+<h4 id="フェーズd-回答生成response-generation">フェーズD: 回答生成（Response Generation）</h4>
+
+<ol>
+  <li>Our Server がツール結果を Claude に送信</li>
+  <li>Claude が自然言語で「Your repositories are…」と回答を生成</li>
+  <li>ユーザーに最終回答を表示</li>
+</ol>
+
+<h3 id="mcpプロトコルメッセージ一覧">MCPプロトコルメッセージ一覧</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>メッセージ</th>
+      <th>方向</th>
+      <th>役割</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">ListToolsRequest</code></td>
+      <td>Client → Server</td>
+      <td>サーバーが公開する全ツールの一覧を要求</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">ListToolsResult</code></td>
+      <td>Server → Client</td>
+      <td>ツール名・説明・引数スキーマの一覧を返却</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">Query + Tools</code></td>
+      <td>Our Server → Claude</td>
+      <td>ユーザーの質問 + ツール定義をLLMに提示</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">ToolUse</code></td>
+      <td>Claude → Our Server</td>
+      <td>LLMが選んだツール名と引数</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">CallToolRequest</code></td>
+      <td>Client → Server</td>
+      <td>指定ツールを指定引数で実行するリクエスト</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">CallToolResult</code></td>
+      <td>Server → Client</td>
+      <td>ツール実行結果</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">toolResult</code></td>
+      <td>Client → Our Server</td>
+      <td>実行結果をアプリケーション側に返す</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>このフローで重要なのは、<strong>Claudeはツールの「選択と引数の決定」だけを行い、実際の実行はMCP Server側で行われる</strong> という責務の分離。LLMは外部APIに直接アクセスせず、MCPプロトコルを介した安全な間接アクセスとなっている。</p>
+
+<hr />
+
+<h2 id="発展トピック">発展トピック</h2>
+
+<h3 id="sampling--サーバーからllmへの逆方向リクエスト">Sampling — サーバーからLLMへの逆方向リクエスト</h3>
+
+<p>通常はClient→Serverの方向だが、<strong>Serverが逆にHostのLLMを使いたい</strong>ケースがある。Samplingプリミティブにより、Serverが <code class="language-plaintext highlighter-rouge">sampling/createMessage</code> でLLMの推論結果を受け取れる。MCPサーバー側にLLM SDKを組み込まなくてもモデルの能力を利用できる仕組み。</p>
+
+<h3 id="elicitation--ユーザーへの問いかけ">Elicitation — ユーザーへの問いかけ</h3>
+
+<p>Serverが処理中に追加情報が必要になった場合、<code class="language-plaintext highlighter-rouge">elicitation/create</code> でユーザーに質問を投げることができる。たとえば「デプロイ先の環境を選んでください」のような確認ダイアログを出す用途。</p>
+
+<h3 id="notifications--リアルタイム通知">Notifications — リアルタイム通知</h3>
+
+<p>ServerのToolリストが変更された場合など、Server→Clientへリアルタイムに通知を送れる。JSON-RPC 2.0のNotification（レスポンス不要のメッセージ）として実装される。</p>
+
+<h3 id="mcpとfunction-callingの違い">MCPとFunction Callingの違い</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>観点</th>
+      <th>MCP</th>
+      <th>Function Calling (API直接)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>標準化</td>
+      <td>オープンプロトコル</td>
+      <td>ベンダー固有のAPI仕様</td>
+    </tr>
+    <tr>
+      <td>ツール発見</td>
+      <td>動的（<code class="language-plaintext highlighter-rouge">tools/list</code>で実行時に発見）</td>
+      <td>静的（API呼び出し時に定義を渡す）</td>
+    </tr>
+    <tr>
+      <td>ステート管理</td>
+      <td>ステートフルセッション</td>
+      <td>ステートレス</td>
+    </tr>
+    <tr>
+      <td>複数ツール接続</td>
+      <td>Host内で複数Serverを並列管理</td>
+      <td>開発者が個別に管理</td>
+    </tr>
+    <tr>
+      <td>再利用性</td>
+      <td>Serverを一度作れば、どのHostからも利用可能</td>
+      <td>アプリごとに再実装が必要</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="セキュリティモデル">セキュリティモデル</h3>
+
+<ul>
+  <li><strong>セッション分離</strong>: 各Client-Serverペアが独立したセッションを持ち、権限やデータが他のセッションに漏れない</li>
+  <li><strong>Hostがゲートキーパー</strong>: どのClientがどのToolを呼べるかはHostが制御する</li>
+  <li><strong>ユーザー同意</strong>: Tool実行前にユーザーの承認を求めるフローをサポート</li>
+  <li><strong>トランスポートセキュリティ</strong>: リモート通信はHTTPS必須、OAuth等の認証に対応</li>
+</ul>
+
+<hr />
+
+<h2 id="まとめ">まとめ</h2>
+
+<p>前回の記事と今回の記事で、MCPの全体像を <strong>2つの視点</strong> からカバーした。</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>視点</th>
+      <th>前回の記事</th>
+      <th>今回の記事</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>通信プロトコル</td>
+      <td>SSE / Stdio / JSON-RPC</td>
+      <td>— （前回参照）</td>
+    </tr>
+    <tr>
+      <td>データフロー</td>
+      <td>get_tools → ainvoke → ReAct</td>
+      <td>— （前回参照）</td>
+    </tr>
+    <tr>
+      <td>アーキテクチャ</td>
+      <td>—</td>
+      <td>Host / Client / Server 3層構造</td>
+    </tr>
+    <tr>
+      <td>プリミティブ</td>
+      <td>—</td>
+      <td>Tools / Resources / Prompts</td>
+    </tr>
+    <tr>
+      <td>処理シーケンス</td>
+      <td>JSON-RPCメッセージ視点</td>
+      <td>6アクター視点（Anthropic Academy準拠）</td>
+    </tr>
+    <tr>
+      <td>ライフサイクル</td>
+      <td>LangChain / Claude.ai のプロセス管理</td>
+      <td>— （前回参照）</td>
+    </tr>
+    <tr>
+      <td>発展トピック</td>
+      <td>—</td>
+      <td>Sampling / Elicitation / セキュリティ</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>MCPを理解するための3つの軸:</p>
+
+<ol>
+  <li><strong>アーキテクチャ</strong>: Host → Client → Server の3層構造。Hostが全体を統括し、Clientが1:1でServerと接続する</li>
+  <li><strong>プリミティブ</strong>: Tools（モデルが呼ぶ）、Resources（アプリが取得する）、Prompts（ユーザーが選ぶ）の3種類</li>
+  <li><strong>プロトコル</strong>: JSON-RPC 2.0ベースのステートフルセッション。STDIOとStreamable HTTPの2つのトランスポートを選択可能</li>
+</ol>
+
+
+  <!-- POST NAVIGATION -->
+  <footer class="postNav clearfix"><a class="prev" href="/blog/blog/langchain-memory-guide/"><span>&laquo;&nbsp;LangChainのメモリ（会話履歴）完全ガイド — レガシーからLangGraphへ</span></a></footer>
+</article>
+      </div>
+   </div><!-- end .content --><div class="footer">
+	<div class="container">
+		<p class="copy">
+			&copy; 2026
+			<a href="http://brianmaierjr.com">Brian Maier Jr.</a> Powered by
+			<a href="http://jekyllrb.com">Jekyll</a>
+		</p>
+
+		<div class="footer-links">
+			<ul class="noList"><li>
+	<a href="https://www.linkedin.com/in/in/%E6%9C%8B-%E5%BC%B5-a77984179" target="_blank">
+	<svg
+		id="linkedin"
+		xmlns="http://www.w3.org/2000/svg"
+		width="96"
+		height="96"
+		viewBox="0 0 96 96"
+	>
+		<g fill="none">
+			<circle
+				class="outer-shape"
+				cx="48"
+				cy="48"
+				r="48"
+				fill="#000"
+			/>
+			<path
+				class="inner-shape"
+				fill="#FFF"
+				d="M10.2966071,46 L0.759821429,46 L0.759821429,15.2881537 L10.2966071,15.2881537 L10.2966071,46 Z M5.52308036,11.0987745 C2.47352679,11.0987745 1.17239551e-12,8.57282522 1.17239551e-12,5.52320357 C1.17239551e-12,2.47282245 2.47276734,-9.65449942e-13 5.52308036,-9.65449942e-13 C8.57339338,-9.65449942e-13 11.0461607,2.47282245 11.0461607,5.52320357 C11.0461607,8.57282522 8.57160714,11.0987745 5.52308036,11.0987745 Z M45.9897321,46 L36.4734821,46 L36.4734821,31.0496663 C36.4734821,27.4866403 36.4016071,22.9173419 31.5151339,22.9173419 C26.5567857,22.9173419 25.7969643,26.7884104 25.7969643,30.7929641 L25.7969643,46 L16.2704464,46 L16.2704464,15.2881537 L25.4170536,15.2881537 L25.4170536,19.4775329 L25.5505357,19.4775329 C26.82375,17.0645326 29.9338839,14.5180472 34.5739286,14.5180472 C44.2257143,14.5180472 46,20.8739927 46,29.1295341 L46,46 L45.9897321,46 Z"
+				transform="translate(25 25)"
+			/>
+		</g>
+	</svg>
+</a>
+</li>
+<li>
+	<a href="https://github.com/avocado-planet" target="_blank">
+		<svg
+			id="github"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path
+				class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.5)"
+				d="M50,1C22.938,1,1,22.938,1,50s21.938,49,49,49s49-21.938,49-49S77.062,1,50,1z M79.099,79.099 c-3.782,3.782-8.184,6.75-13.083,8.823c-1.245,0.526-2.509,0.989-3.79,1.387v-7.344c0-3.86-1.324-6.699-3.972-8.517 c1.659-0.16,3.182-0.383,4.57-0.67c1.388-0.287,2.855-0.702,4.402-1.245c1.547-0.543,2.935-1.189,4.163-1.938 c1.228-0.75,2.409-1.723,3.541-2.919s2.082-2.552,2.847-4.067s1.372-3.334,1.818-5.455c0.446-2.121,0.67-4.458,0.67-7.01 c0-4.945-1.611-9.155-4.833-12.633c1.467-3.828,1.308-7.991-0.478-12.489l-1.197-0.143c-0.829-0.096-2.321,0.255-4.474,1.053 c-2.153,0.798-4.57,2.105-7.249,3.924c-3.797-1.053-7.736-1.579-11.82-1.579c-4.115,0-8.039,0.526-11.772,1.579 c-1.69-1.149-3.294-2.097-4.809-2.847c-1.515-0.75-2.727-1.26-3.637-1.532c-0.909-0.271-1.754-0.439-2.536-0.503 c-0.782-0.064-1.284-0.079-1.507-0.048c-0.223,0.031-0.383,0.064-0.478,0.096c-1.787,4.53-1.946,8.694-0.478,12.489 c-3.222,3.477-4.833,7.688-4.833,12.633c0,2.552,0.223,4.889,0.67,7.01c0.447,2.121,1.053,3.94,1.818,5.455 c0.765,1.515,1.715,2.871,2.847,4.067s2.313,2.169,3.541,2.919c1.228,0.751,2.616,1.396,4.163,1.938 c1.547,0.543,3.014,0.957,4.402,1.245c1.388,0.287,2.911,0.511,4.57,0.67c-2.616,1.787-3.924,4.626-3.924,8.517v7.487 c-1.445-0.43-2.869-0.938-4.268-1.53c-4.899-2.073-9.301-5.041-13.083-8.823c-3.782-3.782-6.75-8.184-8.823-13.083 C9.934,60.948,8.847,55.56,8.847,50s1.087-10.948,3.231-16.016c2.073-4.899,5.041-9.301,8.823-13.083s8.184-6.75,13.083-8.823 C39.052,9.934,44.44,8.847,50,8.847s10.948,1.087,16.016,3.231c4.9,2.073,9.301,5.041,13.083,8.823 c3.782,3.782,6.75,8.184,8.823,13.083c2.143,5.069,3.23,10.457,3.23,16.016s-1.087,10.948-3.231,16.016 C85.848,70.915,82.88,75.317,79.099,79.099L79.099,79.099z"
+			></path>
+		</svg>
+	</a>
+</li>
+</ul>
+		</div>
+	</div>
+</div>
+<!-- end .footer -->
+<!-- Add jQuery and other scripts -->
+<script src="//ajax.googleapis.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
+<script>window.jQuery || document.write('<script src=/blog/assets/js/jquery-1.11.2.min.js><\/script>')</script>
+<script src="/blog/assets/js/dropcap.min.js"></script>
+<script src="/blog/assets/js/responsive-nav.min.js"></script>
+<script src="/blog/assets/js/scripts.js"></script>
+</body>
+
+</html>
