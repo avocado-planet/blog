@@ -5,9 +5,228 @@
     <description>Tech blog on AI, ServiceNow, and cloud engineering</description>
     <link>https://avocado-planet.github.io/</link>
     <atom:link href="https://avocado-planet.github.io/feed.xml" rel="self" type="application/rss+xml"/>
-    <pubDate>Thu, 28 May 2026 14:34:02 +0000</pubDate>
-    <lastBuildDate>Thu, 28 May 2026 14:34:02 +0000</lastBuildDate>
+    <pubDate>Sat, 20 Jun 2026 13:41:03 +0000</pubDate>
+    <lastBuildDate>Sat, 20 Jun 2026 13:41:03 +0000</lastBuildDate>
     <generator>Jekyll v3.10.0</generator><item>
+        <title>AI Agent CLIのメモリ設計：Claude Codeはどうやって「あなた」を覚えているのか</title>
+        <description>&lt;h2 id=&quot;きっかけnew-chatなのになぜ知っている&quot;&gt;きっかけ：New Chatなのになぜ知っている？&lt;/h2&gt;
+
+&lt;p&gt;Claude Codeのようなエージェント型CLIを自作しているなかで、ふと気になることがあった。&lt;/p&gt;
+
+&lt;p&gt;&lt;strong&gt;New Chatを開いたはずなのに、ClaudeはわたしがLangGraphでAI Agent CLIを作っていることを知っている。&lt;/strong&gt;&lt;/p&gt;
+
+&lt;p&gt;これはバグでも魔法でもなく、きちんと設計された仕組みだ。この記事ではその構造を解説する。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;メモリの階層構造&quot;&gt;メモリの階層構造&lt;/h2&gt;
+
+&lt;p&gt;AI Agentのメモリは大きく3層に分かれる。&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;┌─────────────────────────────────────┐
+│  External Memory（永続化）           │
+│  - ファイル / DB / ベクトルDB        │
+├─────────────────────────────────────┤
+│  In-Context Memory（セッション内）    │
+│  - 会話履歴（トークン上限まで）       │
+├─────────────────────────────────────┤
+│  In-Weights Memory（学習済み知識）    │
+│  - LLM自体が持つ知識                 │
+└─────────────────────────────────────┘
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;h3 id=&quot;セッション内new-chatで消える&quot;&gt;セッション内（New Chatで消える）&lt;/h3&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;会話履歴全体（&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;messages[]&lt;/code&gt;配列）&lt;/li&gt;
+  &lt;li&gt;ツール実行結果&lt;/li&gt;
+  &lt;li&gt;ファイルの読み込みキャッシュ&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h3 id=&quot;new-chatをまたいで残るexternal-memory&quot;&gt;New Chatをまたいで残る（External Memory）&lt;/h3&gt;
+
+&lt;p&gt;Claude Codeは &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;CLAUDE.md&lt;/code&gt; というファイルをプロジェクトルートに置く方式を採用している。&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;プロジェクト/
+├── CLAUDE.md          ← プロジェクト固有の記憶
+├── ~/.claude/
+│   └── CLAUDE.md      ← ユーザ全体のグローバル記憶
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;書かれる内容の例：&lt;/p&gt;
+&lt;ul&gt;
+  &lt;li&gt;プロジェクトの技術スタック・規約&lt;/li&gt;
+  &lt;li&gt;よく使うコマンド&lt;/li&gt;
+  &lt;li&gt;「このファイルは触るな」などの制約&lt;/li&gt;
+  &lt;li&gt;ユーザーの好み（テスト方針、コードスタイル等）&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;何を覚えるか--忘れていいかの判断軸&quot;&gt;「何を覚えるか / 忘れていいか」の判断軸&lt;/h2&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;判断軸&lt;/th&gt;
+      &lt;th&gt;覚える対象&lt;/th&gt;
+      &lt;th&gt;忘れていい対象&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;&lt;strong&gt;再利用性&lt;/strong&gt;&lt;/td&gt;
+      &lt;td&gt;プロジェクト構造、技術選定理由&lt;/td&gt;
+      &lt;td&gt;一時的なデバッグ過程&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;&lt;strong&gt;変化頻度&lt;/strong&gt;&lt;/td&gt;
+      &lt;td&gt;アーキテクチャ方針（低頻度）&lt;/td&gt;
+      &lt;td&gt;現在のエラー内容（高頻度）&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;&lt;strong&gt;コスト&lt;/strong&gt;&lt;/td&gt;
+      &lt;td&gt;「また聞くのが面倒」な情報&lt;/td&gt;
+      &lt;td&gt;LLMが自分で推論できること&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;&lt;strong&gt;副作用リスク&lt;/strong&gt;&lt;/td&gt;
+      &lt;td&gt;「やってはいけないこと」&lt;/td&gt;
+      &lt;td&gt;「やったこと」の詳細ログ&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;claudeaiのusermemoriesはまさにこの設計&quot;&gt;Claude.aiのuserMemoriesはまさにこの設計&lt;/h2&gt;
+
+&lt;p&gt;このUIの「メモリ」機能はExternal Memoryの実装例だ。仕組みはシンプル：&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;過去のセッション
+    ↓ (システムが重要情報を抽出・保存)
+外部DB (userMemories)
+    ↓ (New Chat開始時にsystem promptへ注入)
+今のセッション ← Claudeが「知っている」理由
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;実際にわたしのuserMemoriesには以下が保存されている：&lt;/p&gt;
+&lt;ul&gt;
+  &lt;li&gt;職業・居住地などの属性&lt;/li&gt;
+  &lt;li&gt;進行中プロジェクトの状態（agent-ai-cli: LangGraph ReActまで完了）&lt;/li&gt;
+  &lt;li&gt;GitHubオーガニゼーション名・ブログURL&lt;/li&gt;
+  &lt;li&gt;業務内容・過去の学習履歴&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;逆に&lt;strong&gt;忘れられている情報&lt;/strong&gt;：&lt;/p&gt;
+&lt;ul&gt;
+  &lt;li&gt;過去の会話の具体的なやりとり&lt;/li&gt;
+  &lt;li&gt;デバッグ中に試したコードの詳細&lt;/li&gt;
+  &lt;li&gt;解決済みエラーの内容&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;&lt;strong&gt;要約・抽象化された情報だけが残る&lt;/strong&gt;、というのが実際の動作だ。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;メモリ更新のタイミングとトリガー&quot;&gt;メモリ更新のタイミングとトリガー&lt;/h2&gt;
+
+&lt;p&gt;Anthropicの内部実装は非公開だが、観察と一般的な設計パターンから推測できる。&lt;/p&gt;
+
+&lt;p&gt;&lt;strong&gt;リアルタイム更新（発言ごと）は考えにくい&lt;/strong&gt; — コストと遅延の観点から。&lt;/p&gt;
+
+&lt;p&gt;最も自然な設計は&lt;strong&gt;非同期・バッチ処理&lt;/strong&gt;：&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;セッション終了 or 一定時間経過
+    ↓
+バックグラウンドでLLMが会話を分析
+    ↓
+「記憶に値する情報」を抽出・既存メモリと統合
+    ↓
+DBを更新
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;書く&lt;/th&gt;
+      &lt;th&gt;書かない&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;職業・居住地などの属性&lt;/td&gt;
+      &lt;td&gt;一時的な感情・気分&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;進行中プロジェクトの状態&lt;/td&gt;
+      &lt;td&gt;解決済みエラーの詳細&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;明示的な好み・制約&lt;/td&gt;
+      &lt;td&gt;雑談の内容&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;長期的に有効な情報&lt;/td&gt;
+      &lt;td&gt;セッション固有のコンテキスト&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;自作cliへの応用&quot;&gt;自作CLIへの応用&lt;/h2&gt;
+
+&lt;p&gt;LangGraphのReActパターンで実装済みであれば、こう整理できる：&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;k&quot;&gt;class&lt;/span&gt; &lt;span class=&quot;nc&quot;&gt;AgentMemory&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;# Layer 1: In-context（自動）
+&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;conversation_history&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;list&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Message&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;  &lt;span class=&quot;c1&quot;&gt;# LangGraph State
+&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;# Layer 2: External（要実装）
+&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;project_memory&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;str&lt;/span&gt;    &lt;span class=&quot;c1&quot;&gt;# CLAUDE.md相当 → ファイル読み込み
+&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;user_memory&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;str&lt;/span&gt;       &lt;span class=&quot;c1&quot;&gt;# ~/.agentcli/memory.md 相当
+&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;# Layer 3: Episodic（高度）
+&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;past_sessions&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;VectorDB&lt;/span&gt;  &lt;span class=&quot;c1&quot;&gt;# 過去セッションの要約を検索
+&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;セッション終了時にLLMに要約・取捨選択させるプロンプト例：&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;n&quot;&gt;SUMMARIZE_PROMPT&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;&quot;&quot;
+この会話を振り返り、次のセッションに持ち越すべき情報だけを抽出してください。
+
+判断基準:
+- 残す: プロジェクト固有の知識、ユーザーの好み、制約事項
+- 捨てる: 解決済みの一時エラー、試行錯誤の過程、雑談
+
+出力: 箇条書きで簡潔に（200字以内）
+&quot;&quot;&quot;&lt;/span&gt;
+
+&lt;span class=&quot;k&quot;&gt;async&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;update_memory_on_session_end&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;conversation&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;list&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Message&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]):&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;summary&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;await&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;llm&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;invoke&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;SUMMARIZE_PROMPT&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;conversation&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;memory_store&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;merge&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;summary&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;  &lt;span class=&quot;c1&quot;&gt;# 単純上書きではなくmerge
+&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;&lt;strong&gt;mergeが重要&lt;/strong&gt;：単純上書きだと過去の情報が消える。LLMに「既存メモリと矛盾しないか確認してから更新」させるのがポイント。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;まとめ&quot;&gt;まとめ&lt;/h2&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;AI Agentのメモリは &lt;strong&gt;In-Weights / In-Context / External&lt;/strong&gt; の3層構造&lt;/li&gt;
+  &lt;li&gt;New Chatをまたぐには &lt;strong&gt;External Memory&lt;/strong&gt; が必須&lt;/li&gt;
+  &lt;li&gt;Claude Codeは &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;CLAUDE.md&lt;/code&gt; ファイル、Claude.aiは &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;userMemories&lt;/code&gt; がその実装&lt;/li&gt;
+  &lt;li&gt;更新は&lt;strong&gt;セッション終了後の非同期バッチ&lt;/strong&gt;が自然な設計&lt;/li&gt;
+  &lt;li&gt;忘れる判断は&lt;strong&gt;再利用性・変化頻度・コスト・副作用リスク&lt;/strong&gt;の4軸&lt;/li&gt;
+  &lt;li&gt;自作CLIでは&lt;strong&gt;セッション終了フック＋LLMによる要約＋mergeロジック&lt;/strong&gt;で実現できる&lt;/li&gt;
+&lt;/ul&gt;
+</description><description>&lt;h2 id=&quot;きっかけnew-chatなのになぜ知っている&quot;&gt;きっかけ：New Chatなのになぜ知っている？&lt;/h2&gt;
+
+</description><pubDate>Sat, 20 Jun 2026 00:00:00 +0000</pubDate>
+        <link>https://avocado-planet.github.io/blog/ai-agent-cli-memory/</link>
+        <guid isPermaLink="true">https://avocado-planet.github.io/blog/ai-agent-cli-memory/</guid></item><item>
         <title>MCPアーキテクチャ深掘り：Host-Client-Server構造、3つのプリミティブ、処理シーケンス</title>
         <description>&lt;p&gt;前回の記事（&lt;a href=&quot;https://avocado-planet.github.io/blog/blog/mcp-stdio-sse-dataflow/&quot;&gt;MCPの仕組みを理解する：SSE・Stdio通信からLLMとのデータフローまで&lt;/a&gt;）では、MCPの通信方式（SSE/Stdio）、JSON-RPCの流れ、LLMとのデータフロー、プロセスのライフサイクルを整理した。&lt;/p&gt;
 
