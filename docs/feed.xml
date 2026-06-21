@@ -5,9 +5,240 @@
     <description>Tech blog on AI, ServiceNow, and cloud engineering</description>
     <link>https://avocado-planet.github.io/</link>
     <atom:link href="https://avocado-planet.github.io/feed.xml" rel="self" type="application/rss+xml"/>
-    <pubDate>Sat, 20 Jun 2026 13:41:03 +0000</pubDate>
-    <lastBuildDate>Sat, 20 Jun 2026 13:41:03 +0000</lastBuildDate>
+    <pubDate>Sun, 21 Jun 2026 13:48:29 +0000</pubDate>
+    <lastBuildDate>Sun, 21 Jun 2026 13:48:29 +0000</lastBuildDate>
     <generator>Jekyll v3.10.0</generator><item>
+        <title>AI Agentのメモリ設計 深掘り編：依存関係・挿入戦略・更新コスト</title>
+        <description>&lt;p&gt;前回の記事（&lt;a href=&quot;/blog/2026/06/20/ai-agent-cli-memory.html&quot;&gt;AI Agent CLIのメモリ設計：Claude Codeはどうやって「あなた」を覚えているのか&lt;/a&gt;）では、メモリの3層構造・CLAUDE.md・更新タイミングの基礎を整理した。&lt;/p&gt;
+
+&lt;p&gt;今回はその続き。&lt;strong&gt;この会話自体がExternal Memoryの実演&lt;/strong&gt;になっているという気づきから始まり、依存関係・挿入戦略・更新コストの最適化まで深掘りする。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;この会話自体が実演だった&quot;&gt;この会話自体が実演だった&lt;/h2&gt;
+
+&lt;p&gt;New Chatを開いた瞬間、ClaudeはわたしがLangGraphでAI Agent CLIを作っていることを知っていた。&lt;/p&gt;
+
+&lt;p&gt;これは前回説明したExternal Memoryのフローそのものだ：&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;過去のセッション
+    ↓ (Anthropicのシステムが重要情報を抽出・保存)
+外部DB (userMemories)
+    ↓ (New Chat開始時にsystem promptへ注入)
+今のセッション ← Claudeが「知っている」理由
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;実際にsystem promptに注入されているuserMemoriesには、職業・居住地・進行中プロジェクト（フェーズ進捗まで）・GitHubのオーガニゼーション名などが含まれている。&lt;/p&gt;
+
+&lt;p&gt;逆に&lt;strong&gt;忘れられている情報&lt;/strong&gt;：&lt;/p&gt;
+&lt;ul&gt;
+  &lt;li&gt;過去の会話の具体的なやりとり&lt;/li&gt;
+  &lt;li&gt;デバッグ中に試したコードの詳細&lt;/li&gt;
+  &lt;li&gt;解決済みエラーの内容&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;要約・抽象化された情報だけが残る、というのが実際の動作だ。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;メモリ間の依存関係問題&quot;&gt;メモリ間の依存関係問題&lt;/h2&gt;
+
+&lt;p&gt;ここが設計の難所だ。&lt;/p&gt;
+
+&lt;p&gt;たとえばこういうメモリがあるとする：&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;「PENGは東京在住」&lt;/li&gt;
+  &lt;li&gt;「小田急線で通勤30分」&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;ここで「福岡に引っ越した」と伝えたら？&lt;/p&gt;
+
+&lt;p&gt;東京在住は更新されるが、&lt;strong&gt;小田急線の情報も無効になる&lt;/strong&gt;はずだ。しかしフラットな箇条書き管理では依存関係が暗黙的にしか存在せず、芋づる式の削除が起きない可能性がある。&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;記憶A: 東京在住
+記憶B: 小田急線で通勤30分  ← 記憶Aに依存しているが明示されていない
+
+新情報: 福岡に引っ越し
+    ↓
+記憶Aは更新 → 記憶Bが残ったまま ← 矛盾発生
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;LLMとして意味的な矛盾検出は得意だ。「福岡→小田急線に乗れない→通勤30分も無効」という推論チェーンは理解できる。ただしそれをメモリに&lt;strong&gt;自動反映できるかは別問題&lt;/strong&gt;だ。&lt;/p&gt;
+
+&lt;h3 id=&quot;依存関係を明示する設計&quot;&gt;依存関係を明示する設計&lt;/h3&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;n&quot;&gt;memories&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+        &lt;span class=&quot;s&quot;&gt;&quot;id&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;M001&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+        &lt;span class=&quot;s&quot;&gt;&quot;fact&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;東京在住&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+        &lt;span class=&quot;s&quot;&gt;&quot;tags&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;location&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;residence&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;},&lt;/span&gt;
+    &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;
+        &lt;span class=&quot;s&quot;&gt;&quot;id&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;M002&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+        &lt;span class=&quot;s&quot;&gt;&quot;fact&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;小田急線で通勤30分&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
+        &lt;span class=&quot;s&quot;&gt;&quot;tags&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;commute&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;],&lt;/span&gt;
+        &lt;span class=&quot;s&quot;&gt;&quot;depends_on&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;M001&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;  &lt;span class=&quot;c1&quot;&gt;# ← 依存関係を明示
+&lt;/span&gt;    &lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;
+
+&lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;update_memory&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;new_fact&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;str&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;category&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;str&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;):&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;# 依存しているメモリも検証対象に含める
+&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;affected&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;find_dependent_memories&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;new_fact&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;llm&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;validate_and_prune&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;affected&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;完全な依存グラフ管理は複雑すぎるので、実用的にはタグベースで近似するのが現実的だ：&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;c1&quot;&gt;# locationタグが変わったらcommuteタグも再検証
+&lt;/span&gt;&lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;update_memory&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;new_fact&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;str&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;category&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;str&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;):&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;related&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;memory_store&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;nb&quot;&gt;filter&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;category&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;category&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;# 依存カテゴリも追加
+&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;dependents&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;CATEGORY_DEPS&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;get&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;category&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;[])&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;for&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;dep&lt;/span&gt; &lt;span class=&quot;ow&quot;&gt;in&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;dependents&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;
+        &lt;span class=&quot;n&quot;&gt;related&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;memory_store&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;nb&quot;&gt;filter&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;category&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;dep&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;validated&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;llm&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;check_conflicts&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;new_fact&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;related&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;n&quot;&gt;memory_store&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;update&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;validated&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;全メモリを毎回挿入するか&quot;&gt;全メモリを毎回挿入するか？&lt;/h2&gt;
+
+&lt;p&gt;メモリ件数によってアプローチが変わる。&lt;/p&gt;
+
+&lt;h3 id=&quot;小規模数十件-全件挿入でok&quot;&gt;小規模（〜数十件）→ 全件挿入でOK&lt;/h3&gt;
+
+&lt;p&gt;シンプルで確実。Claude.aiのuserMemoriesはおそらくこの方式だ。&lt;/p&gt;
+
+&lt;h3 id=&quot;大規模数百数千件-ragで関連分だけ挿入&quot;&gt;大規模（数百〜数千件）→ RAGで関連分だけ挿入&lt;/h3&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;ユーザーの質問
+    ↓ Embedding化
+ベクトル検索
+    ↓ 類似度上位N件だけ取得
+System Promptに挿入
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;ただし全件挿入でも&lt;strong&gt;コンテキストウィンドウの圧迫&lt;/strong&gt;という問題がある：&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;モデルのコンテキスト上限
+├── System Prompt（メモリ含む）← 増え続ける
+├── 会話履歴               ← 増え続ける
+└── 今の質問・回答         ← 圧迫される
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;メモリが増えると会話履歴を削らざるを得なくなる、という逆転現象が起きる。&lt;/p&gt;
+
+&lt;p&gt;段階的アプローチが現実的だ：&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;n&quot;&gt;MAX_MEMORY_TOKENS&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;mi&quot;&gt;2000&lt;/span&gt;
+
+&lt;span class=&quot;k&quot;&gt;def&lt;/span&gt; &lt;span class=&quot;nf&quot;&gt;inject_memories&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;query&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;str&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;all_memories&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;list&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;-&amp;gt;&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;str&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;
+    &lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;token_count&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;all_memories&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;&amp;lt;&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;MAX_MEMORY_TOKENS&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;format_all&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;all_memories&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;           &lt;span class=&quot;c1&quot;&gt;# 全件
+&lt;/span&gt;    &lt;span class=&quot;k&quot;&gt;else&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;
+        &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;search_relevant&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;query&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;all_memories&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;  &lt;span class=&quot;c1&quot;&gt;# RAG
+&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;更新コストの最適化&quot;&gt;更新コストの最適化&lt;/h2&gt;
+
+&lt;p&gt;「更新時に全メモリをチェックする」のはコスト的に条件がある：&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;更新コスト = 全メモリ件数 × トークン単価 × 更新頻度
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;更新が多い × メモリが多い = コスト爆発。&lt;/p&gt;
+
+&lt;h3 id=&quot;規模と更新頻度で戦略を使い分ける&quot;&gt;規模と更新頻度で戦略を使い分ける&lt;/h3&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;              メモリ少ない    メモリ多い
+             ┌────────────┬────────────┐
+更新少ない    │ 全件チェック │ 全件チェック│
+             ├────────────┼────────────┤
+更新多い     │ 全件チェック │ 局所チェック│
+             └────────────┴────────────┘
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;h3 id=&quot;バッファリングで一括処理&quot;&gt;バッファリングで一括処理&lt;/h3&gt;
+
+&lt;p&gt;最もコスパが良いのはセッション単位でまとめて処理する方法だ：&lt;/p&gt;
+
+&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;会話中の新情報
+    ↓
+更新キューに溜める（即時チェックしない）
+    ↓
+セッション終了時 or 閾値到達時に一括処理
+    ↓
+1回のAPI呼び出しで複数更新をまとめて処理
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;h3 id=&quot;戦略の選び方&quot;&gt;戦略の選び方&lt;/h3&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;戦略&lt;/th&gt;
+      &lt;th&gt;適する場面&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;全件チェック&lt;/td&gt;
+      &lt;td&gt;更新が1日数回程度&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;カテゴリ局所チェック&lt;/td&gt;
+      &lt;td&gt;更新が多いが分類できる&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;バッファリング一括処理&lt;/td&gt;
+      &lt;td&gt;リアルタイム性不要な用途&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;RAG類似検索&lt;/td&gt;
+      &lt;td&gt;メモリが数百件超&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;個人用途のAgent CLIなら&lt;strong&gt;バッファリング一括処理&lt;/strong&gt;が最もコスパが良い。&lt;/p&gt;
+
+&lt;hr /&gt;
+
+&lt;h2 id=&quot;agent-ai-cliへの応用まとめ&quot;&gt;agent-ai-cliへの応用まとめ&lt;/h2&gt;
+
+&lt;p&gt;現在のフェーズ（LangGraph ReAct完了）を踏まえた実装イメージ：&lt;/p&gt;
+
+&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;k&quot;&gt;class&lt;/span&gt; &lt;span class=&quot;nc&quot;&gt;AgentMemory&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;# Layer 1: In-context（LangGraph Stateで自動管理）
+&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;conversation_history&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;list&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Message&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;
+
+    &lt;span class=&quot;c1&quot;&gt;# Layer 2: External（Phase 4で実装予定）
+&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;user_memory&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;str&lt;/span&gt;       &lt;span class=&quot;c1&quot;&gt;# ~/.agentcli/memory.md
+&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;project_memory&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;nb&quot;&gt;str&lt;/span&gt;    &lt;span class=&quot;c1&quot;&gt;# ./AGENT.md（CLAUDE.md相当）
+&lt;/span&gt;
+    &lt;span class=&quot;c1&quot;&gt;# Layer 3: Episodic（将来）
+&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;past_sessions&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;VectorDB&lt;/span&gt;
+&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+
+&lt;p&gt;Phase 4の実装優先順位として考えると：&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;セッション終了フック → LLMによる要約 → ファイル保存（最小実装）&lt;/li&gt;
+  &lt;li&gt;カテゴリタグ付き依存関係管理&lt;/li&gt;
+  &lt;li&gt;トークン上限監視 → 自動RAG切り替え&lt;/li&gt;
+  &lt;li&gt;バッファリング更新キュー&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;メモリ設計は「何を覚えるか」だけでなく、&lt;strong&gt;依存関係・挿入戦略・更新コスト&lt;/strong&gt;の3つを同時に考える必要がある。&lt;/p&gt;
+</description><description>&lt;p&gt;前回の記事（&lt;a href=&quot;/blog/2026/06/20/ai-agent-cli-memory.html&quot;&gt;AI Agent CLIのメモリ設計：Claude Codeはどうやって「あなた」を覚えているのか&lt;/a&gt;）では、メモリの3層構造・CLAUDE.md・更新タイミングの基礎を整理した。&lt;/p&gt;
+
+</description><pubDate>Sun, 21 Jun 2026 00:00:00 +0000</pubDate>
+        <link>https://avocado-planet.github.io/blog/ai-agent-memory-advanced/</link>
+        <guid isPermaLink="true">https://avocado-planet.github.io/blog/ai-agent-memory-advanced/</guid></item><item>
         <title>AI Agent CLIのメモリ設計：Claude Codeはどうやって「あなた」を覚えているのか</title>
         <description>&lt;h2 id=&quot;きっかけnew-chatなのになぜ知っている&quot;&gt;きっかけ：New Chatなのになぜ知っている？&lt;/h2&gt;
 

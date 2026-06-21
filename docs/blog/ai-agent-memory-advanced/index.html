@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<!--[if lt IE 7]><html class="no-js lt-ie9 lt-ie8 lt-ie7"><![endif]-->
+<!--[if IE 7]><html class="no-js lt-ie9 lt-ie8" <![endif]-->
+<!--[if IE 8]><html class="no-js lt-ie9" <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js"> <!--<![endif]--><head>
+	<meta charset="utf-8" />
+	<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<meta name="description" content="" />
+	<title>AI Agentのメモリ設計 深掘り編：依存関係・挿入戦略・更新コスト</title>
+
+	<!-- Open Graph Meta -->
+	<meta content="Avocado Planet" property="og:site_name" /><meta content="AI Agentのメモリ設計 深掘り編：依存関係・挿入戦略・更新コスト" property="og:title" /><meta content="article" property="og:type" /><meta content="前回の3層構造の続き。メモリ間の依存関係問題、全件挿入vsRAP、更新コストのバッファリング最適化まで、この会話自体を実例に整理する。" property="og:description" /><meta content="https://avocado-planet.github.io/blog/blog/ai-agent-memory-advanced/" property="og:url" /><meta
+		content="2026-06-21T00:00:00+00:00"
+		property="article:published_time"
+	/>
+	<meta content="https://avocado-planet.github.io/blog/about/" property="article:author" /><meta
+		content="https://avocado-planet.github.io/blog/assets/img/touring.jpg"
+		property="og:image"
+	/><!-- Twitter Cards -->
+	<meta name="twitter:card" content="summary" />
+	<meta name="twitter:site" content="@" />
+	<meta name="twitter:creator" content="@" /><meta name="twitter:title" content="AI Agentのメモリ設計 深掘り編：依存関係・挿入戦略・更新コスト" /><meta name="twitter:url" content="https://avocado-planet.github.io/blog/blog/ai-agent-memory-advanced/" /><meta name="twitter:description" content="前回の3層構造の続き。メモリ間の依存関係問題、全件挿入vsRAP、更新コストのバッファリング最適化まで、この会話自体を実例に整理する。" /><meta
+		name="twitter:image:src"
+		content="https://avocado-planet.github.io/blog/assets/img/touring.jpg"
+	/><!-- Favicon -->
+	<link rel="icon" type="image/x-icon" href=""/>
+
+	<!-- Come and get me RSS readers -->
+	<link rel="alternate" type="application/rss+xml" title="Avocado Planet"
+	href="https://avocado-planet.github.io/blog/feed.xml" />
+
+	<!-- Stylesheet -->
+	<link rel="stylesheet" href="/blog/assets/css/style.css" />
+
+	<!-- Canonical URL -->
+	<link
+		rel="canonical"
+		href="https://avocado-planet.github.io/blog/blog/ai-agent-memory-advanced/"
+	/></head>
+<body> <div class="header ">
+     <div class="container">
+         <h1 class="logo"><a href="/blog/">Avocado Planet</a></h1>
+         <nav class="nav-collapse">
+             <ul class="noList"><li class="elementfirst">
+                     <a href="/blog/index.html">Home</a>
+                 </li><li class="elementlast">
+                     <a href="/blog/about">About</a>
+                 </li><li> <a href="https://github.com/avocado-planet/" target="_blank">GitHub</a></li>
+             </ul>
+         </nav>
+     </div>
+ </div><!-- end .header -->
+<div class="content">
+      <div class="container">
+         <article class="post"><header>
+    <h1 class="postTitle">AI Agentのメモリ設計 深掘り編：依存関係・挿入戦略・更新コスト</h1>
+    <p class="meta">June 21, 2026 | <span class="time">3</span> Minute Read</p>
+  </header>
+
+  <p>前回の記事（<a href="/blog/2026/06/20/ai-agent-cli-memory.html">AI Agent CLIのメモリ設計：Claude Codeはどうやって「あなた」を覚えているのか</a>）では、メモリの3層構造・CLAUDE.md・更新タイミングの基礎を整理した。</p>
+
+<p>今回はその続き。<strong>この会話自体がExternal Memoryの実演</strong>になっているという気づきから始まり、依存関係・挿入戦略・更新コストの最適化まで深掘りする。</p>
+
+<hr />
+
+<h2 id="この会話自体が実演だった">この会話自体が実演だった</h2>
+
+<p>New Chatを開いた瞬間、ClaudeはわたしがLangGraphでAI Agent CLIを作っていることを知っていた。</p>
+
+<p>これは前回説明したExternal Memoryのフローそのものだ：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>過去のセッション
+    ↓ (Anthropicのシステムが重要情報を抽出・保存)
+外部DB (userMemories)
+    ↓ (New Chat開始時にsystem promptへ注入)
+今のセッション ← Claudeが「知っている」理由
+</code></pre></div></div>
+
+<p>実際にsystem promptに注入されているuserMemoriesには、職業・居住地・進行中プロジェクト（フェーズ進捗まで）・GitHubのオーガニゼーション名などが含まれている。</p>
+
+<p>逆に<strong>忘れられている情報</strong>：</p>
+<ul>
+  <li>過去の会話の具体的なやりとり</li>
+  <li>デバッグ中に試したコードの詳細</li>
+  <li>解決済みエラーの内容</li>
+</ul>
+
+<p>要約・抽象化された情報だけが残る、というのが実際の動作だ。</p>
+
+<hr />
+
+<h2 id="メモリ間の依存関係問題">メモリ間の依存関係問題</h2>
+
+<p>ここが設計の難所だ。</p>
+
+<p>たとえばこういうメモリがあるとする：</p>
+
+<ul>
+  <li>「PENGは東京在住」</li>
+  <li>「小田急線で通勤30分」</li>
+</ul>
+
+<p>ここで「福岡に引っ越した」と伝えたら？</p>
+
+<p>東京在住は更新されるが、<strong>小田急線の情報も無効になる</strong>はずだ。しかしフラットな箇条書き管理では依存関係が暗黙的にしか存在せず、芋づる式の削除が起きない可能性がある。</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>記憶A: 東京在住
+記憶B: 小田急線で通勤30分  ← 記憶Aに依存しているが明示されていない
+
+新情報: 福岡に引っ越し
+    ↓
+記憶Aは更新 → 記憶Bが残ったまま ← 矛盾発生
+</code></pre></div></div>
+
+<p>LLMとして意味的な矛盾検出は得意だ。「福岡→小田急線に乗れない→通勤30分も無効」という推論チェーンは理解できる。ただしそれをメモリに<strong>自動反映できるかは別問題</strong>だ。</p>
+
+<h3 id="依存関係を明示する設計">依存関係を明示する設計</h3>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">memories</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="p">{</span>
+        <span class="s">"id"</span><span class="p">:</span> <span class="s">"M001"</span><span class="p">,</span>
+        <span class="s">"fact"</span><span class="p">:</span> <span class="s">"東京在住"</span><span class="p">,</span>
+        <span class="s">"tags"</span><span class="p">:</span> <span class="p">[</span><span class="s">"location"</span><span class="p">,</span> <span class="s">"residence"</span><span class="p">]</span>
+    <span class="p">},</span>
+    <span class="p">{</span>
+        <span class="s">"id"</span><span class="p">:</span> <span class="s">"M002"</span><span class="p">,</span>
+        <span class="s">"fact"</span><span class="p">:</span> <span class="s">"小田急線で通勤30分"</span><span class="p">,</span>
+        <span class="s">"tags"</span><span class="p">:</span> <span class="p">[</span><span class="s">"commute"</span><span class="p">],</span>
+        <span class="s">"depends_on"</span><span class="p">:</span> <span class="p">[</span><span class="s">"M001"</span><span class="p">]</span>  <span class="c1"># ← 依存関係を明示
+</span>    <span class="p">}</span>
+<span class="p">]</span>
+
+<span class="k">def</span> <span class="nf">update_memory</span><span class="p">(</span><span class="n">new_fact</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">category</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+    <span class="c1"># 依存しているメモリも検証対象に含める
+</span>    <span class="n">affected</span> <span class="o">=</span> <span class="n">find_dependent_memories</span><span class="p">(</span><span class="n">new_fact</span><span class="p">)</span>
+    <span class="n">llm</span><span class="p">.</span><span class="n">validate_and_prune</span><span class="p">(</span><span class="n">affected</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>完全な依存グラフ管理は複雑すぎるので、実用的にはタグベースで近似するのが現実的だ：</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># locationタグが変わったらcommuteタグも再検証
+</span><span class="k">def</span> <span class="nf">update_memory</span><span class="p">(</span><span class="n">new_fact</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">category</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+    <span class="n">related</span> <span class="o">=</span> <span class="n">memory_store</span><span class="p">.</span><span class="nb">filter</span><span class="p">(</span><span class="n">category</span><span class="o">=</span><span class="n">category</span><span class="p">)</span>
+    <span class="c1"># 依存カテゴリも追加
+</span>    <span class="n">dependents</span> <span class="o">=</span> <span class="n">CATEGORY_DEPS</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="n">category</span><span class="p">,</span> <span class="p">[])</span>
+    <span class="k">for</span> <span class="n">dep</span> <span class="ow">in</span> <span class="n">dependents</span><span class="p">:</span>
+        <span class="n">related</span> <span class="o">+=</span> <span class="n">memory_store</span><span class="p">.</span><span class="nb">filter</span><span class="p">(</span><span class="n">category</span><span class="o">=</span><span class="n">dep</span><span class="p">)</span>
+    <span class="n">validated</span> <span class="o">=</span> <span class="n">llm</span><span class="p">.</span><span class="n">check_conflicts</span><span class="p">(</span><span class="n">new_fact</span><span class="p">,</span> <span class="n">related</span><span class="p">)</span>
+    <span class="n">memory_store</span><span class="p">.</span><span class="n">update</span><span class="p">(</span><span class="n">validated</span><span class="p">)</span>
+</code></pre></div></div>
+
+<hr />
+
+<h2 id="全メモリを毎回挿入するか">全メモリを毎回挿入するか？</h2>
+
+<p>メモリ件数によってアプローチが変わる。</p>
+
+<h3 id="小規模数十件-全件挿入でok">小規模（〜数十件）→ 全件挿入でOK</h3>
+
+<p>シンプルで確実。Claude.aiのuserMemoriesはおそらくこの方式だ。</p>
+
+<h3 id="大規模数百数千件-ragで関連分だけ挿入">大規模（数百〜数千件）→ RAGで関連分だけ挿入</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ユーザーの質問
+    ↓ Embedding化
+ベクトル検索
+    ↓ 類似度上位N件だけ取得
+System Promptに挿入
+</code></pre></div></div>
+
+<p>ただし全件挿入でも<strong>コンテキストウィンドウの圧迫</strong>という問題がある：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>モデルのコンテキスト上限
+├── System Prompt（メモリ含む）← 増え続ける
+├── 会話履歴               ← 増え続ける
+└── 今の質問・回答         ← 圧迫される
+</code></pre></div></div>
+
+<p>メモリが増えると会話履歴を削らざるを得なくなる、という逆転現象が起きる。</p>
+
+<p>段階的アプローチが現実的だ：</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">MAX_MEMORY_TOKENS</span> <span class="o">=</span> <span class="mi">2000</span>
+
+<span class="k">def</span> <span class="nf">inject_memories</span><span class="p">(</span><span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">all_memories</span><span class="p">:</span> <span class="nb">list</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">token_count</span><span class="p">(</span><span class="n">all_memories</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">MAX_MEMORY_TOKENS</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">format_all</span><span class="p">(</span><span class="n">all_memories</span><span class="p">)</span>           <span class="c1"># 全件
+</span>    <span class="k">else</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">search_relevant</span><span class="p">(</span><span class="n">query</span><span class="p">,</span> <span class="n">all_memories</span><span class="p">)</span>  <span class="c1"># RAG
+</span></code></pre></div></div>
+
+<hr />
+
+<h2 id="更新コストの最適化">更新コストの最適化</h2>
+
+<p>「更新時に全メモリをチェックする」のはコスト的に条件がある：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>更新コスト = 全メモリ件数 × トークン単価 × 更新頻度
+</code></pre></div></div>
+
+<p>更新が多い × メモリが多い = コスト爆発。</p>
+
+<h3 id="規模と更新頻度で戦略を使い分ける">規模と更新頻度で戦略を使い分ける</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>              メモリ少ない    メモリ多い
+             ┌────────────┬────────────┐
+更新少ない    │ 全件チェック │ 全件チェック│
+             ├────────────┼────────────┤
+更新多い     │ 全件チェック │ 局所チェック│
+             └────────────┴────────────┘
+</code></pre></div></div>
+
+<h3 id="バッファリングで一括処理">バッファリングで一括処理</h3>
+
+<p>最もコスパが良いのはセッション単位でまとめて処理する方法だ：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>会話中の新情報
+    ↓
+更新キューに溜める（即時チェックしない）
+    ↓
+セッション終了時 or 閾値到達時に一括処理
+    ↓
+1回のAPI呼び出しで複数更新をまとめて処理
+</code></pre></div></div>
+
+<h3 id="戦略の選び方">戦略の選び方</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>戦略</th>
+      <th>適する場面</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>全件チェック</td>
+      <td>更新が1日数回程度</td>
+    </tr>
+    <tr>
+      <td>カテゴリ局所チェック</td>
+      <td>更新が多いが分類できる</td>
+    </tr>
+    <tr>
+      <td>バッファリング一括処理</td>
+      <td>リアルタイム性不要な用途</td>
+    </tr>
+    <tr>
+      <td>RAG類似検索</td>
+      <td>メモリが数百件超</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>個人用途のAgent CLIなら<strong>バッファリング一括処理</strong>が最もコスパが良い。</p>
+
+<hr />
+
+<h2 id="agent-ai-cliへの応用まとめ">agent-ai-cliへの応用まとめ</h2>
+
+<p>現在のフェーズ（LangGraph ReAct完了）を踏まえた実装イメージ：</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">class</span> <span class="nc">AgentMemory</span><span class="p">:</span>
+    <span class="c1"># Layer 1: In-context（LangGraph Stateで自動管理）
+</span>    <span class="n">conversation_history</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Message</span><span class="p">]</span>
+
+    <span class="c1"># Layer 2: External（Phase 4で実装予定）
+</span>    <span class="n">user_memory</span><span class="p">:</span> <span class="nb">str</span>       <span class="c1"># ~/.agentcli/memory.md
+</span>    <span class="n">project_memory</span><span class="p">:</span> <span class="nb">str</span>    <span class="c1"># ./AGENT.md（CLAUDE.md相当）
+</span>
+    <span class="c1"># Layer 3: Episodic（将来）
+</span>    <span class="n">past_sessions</span><span class="p">:</span> <span class="n">VectorDB</span>
+</code></pre></div></div>
+
+<p>Phase 4の実装優先順位として考えると：</p>
+
+<ol>
+  <li>セッション終了フック → LLMによる要約 → ファイル保存（最小実装）</li>
+  <li>カテゴリタグ付き依存関係管理</li>
+  <li>トークン上限監視 → 自動RAG切り替え</li>
+  <li>バッファリング更新キュー</li>
+</ol>
+
+<p>メモリ設計は「何を覚えるか」だけでなく、<strong>依存関係・挿入戦略・更新コスト</strong>の3つを同時に考える必要がある。</p>
+
+
+  <!-- POST NAVIGATION -->
+  <footer class="postNav clearfix"><a class="prev" href="/blog/blog/ai-agent-cli-memory/"><span>&laquo;&nbsp;AI Agent CLIのメモリ設計：Claude Codeはどうやって「あなた」を覚えているのか</span></a></footer>
+</article>
+      </div>
+   </div><!-- end .content --><div class="footer">
+	<div class="container">
+		<p class="copy">
+			&copy; 2026
+			<a href="http://brianmaierjr.com">Brian Maier Jr.</a> Powered by
+			<a href="http://jekyllrb.com">Jekyll</a>
+		</p>
+
+		<div class="footer-links">
+			<ul class="noList"><li>
+	<a href="https://www.linkedin.com/in/in/%E6%9C%8B-%E5%BC%B5-a77984179" target="_blank">
+	<svg
+		id="linkedin"
+		xmlns="http://www.w3.org/2000/svg"
+		width="96"
+		height="96"
+		viewBox="0 0 96 96"
+	>
+		<g fill="none">
+			<circle
+				class="outer-shape"
+				cx="48"
+				cy="48"
+				r="48"
+				fill="#000"
+			/>
+			<path
+				class="inner-shape"
+				fill="#FFF"
+				d="M10.2966071,46 L0.759821429,46 L0.759821429,15.2881537 L10.2966071,15.2881537 L10.2966071,46 Z M5.52308036,11.0987745 C2.47352679,11.0987745 1.17239551e-12,8.57282522 1.17239551e-12,5.52320357 C1.17239551e-12,2.47282245 2.47276734,-9.65449942e-13 5.52308036,-9.65449942e-13 C8.57339338,-9.65449942e-13 11.0461607,2.47282245 11.0461607,5.52320357 C11.0461607,8.57282522 8.57160714,11.0987745 5.52308036,11.0987745 Z M45.9897321,46 L36.4734821,46 L36.4734821,31.0496663 C36.4734821,27.4866403 36.4016071,22.9173419 31.5151339,22.9173419 C26.5567857,22.9173419 25.7969643,26.7884104 25.7969643,30.7929641 L25.7969643,46 L16.2704464,46 L16.2704464,15.2881537 L25.4170536,15.2881537 L25.4170536,19.4775329 L25.5505357,19.4775329 C26.82375,17.0645326 29.9338839,14.5180472 34.5739286,14.5180472 C44.2257143,14.5180472 46,20.8739927 46,29.1295341 L46,46 L45.9897321,46 Z"
+				transform="translate(25 25)"
+			/>
+		</g>
+	</svg>
+</a>
+</li>
+<li>
+	<a href="https://github.com/avocado-planet" target="_blank">
+		<svg
+			id="github"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path
+				class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.5)"
+				d="M50,1C22.938,1,1,22.938,1,50s21.938,49,49,49s49-21.938,49-49S77.062,1,50,1z M79.099,79.099 c-3.782,3.782-8.184,6.75-13.083,8.823c-1.245,0.526-2.509,0.989-3.79,1.387v-7.344c0-3.86-1.324-6.699-3.972-8.517 c1.659-0.16,3.182-0.383,4.57-0.67c1.388-0.287,2.855-0.702,4.402-1.245c1.547-0.543,2.935-1.189,4.163-1.938 c1.228-0.75,2.409-1.723,3.541-2.919s2.082-2.552,2.847-4.067s1.372-3.334,1.818-5.455c0.446-2.121,0.67-4.458,0.67-7.01 c0-4.945-1.611-9.155-4.833-12.633c1.467-3.828,1.308-7.991-0.478-12.489l-1.197-0.143c-0.829-0.096-2.321,0.255-4.474,1.053 c-2.153,0.798-4.57,2.105-7.249,3.924c-3.797-1.053-7.736-1.579-11.82-1.579c-4.115,0-8.039,0.526-11.772,1.579 c-1.69-1.149-3.294-2.097-4.809-2.847c-1.515-0.75-2.727-1.26-3.637-1.532c-0.909-0.271-1.754-0.439-2.536-0.503 c-0.782-0.064-1.284-0.079-1.507-0.048c-0.223,0.031-0.383,0.064-0.478,0.096c-1.787,4.53-1.946,8.694-0.478,12.489 c-3.222,3.477-4.833,7.688-4.833,12.633c0,2.552,0.223,4.889,0.67,7.01c0.447,2.121,1.053,3.94,1.818,5.455 c0.765,1.515,1.715,2.871,2.847,4.067s2.313,2.169,3.541,2.919c1.228,0.751,2.616,1.396,4.163,1.938 c1.547,0.543,3.014,0.957,4.402,1.245c1.388,0.287,2.911,0.511,4.57,0.67c-2.616,1.787-3.924,4.626-3.924,8.517v7.487 c-1.445-0.43-2.869-0.938-4.268-1.53c-4.899-2.073-9.301-5.041-13.083-8.823c-3.782-3.782-6.75-8.184-8.823-13.083 C9.934,60.948,8.847,55.56,8.847,50s1.087-10.948,3.231-16.016c2.073-4.899,5.041-9.301,8.823-13.083s8.184-6.75,13.083-8.823 C39.052,9.934,44.44,8.847,50,8.847s10.948,1.087,16.016,3.231c4.9,2.073,9.301,5.041,13.083,8.823 c3.782,3.782,6.75,8.184,8.823,13.083c2.143,5.069,3.23,10.457,3.23,16.016s-1.087,10.948-3.231,16.016 C85.848,70.915,82.88,75.317,79.099,79.099L79.099,79.099z"
+			></path>
+		</svg>
+	</a>
+</li>
+</ul>
+		</div>
+	</div>
+</div>
+<!-- end .footer -->
+<!-- Add jQuery and other scripts -->
+<script src="//ajax.googleapis.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
+<script>window.jQuery || document.write('<script src=/blog/assets/js/jquery-1.11.2.min.js><\/script>')</script>
+<script src="/blog/assets/js/dropcap.min.js"></script>
+<script src="/blog/assets/js/responsive-nav.min.js"></script>
+<script src="/blog/assets/js/scripts.js"></script>
+</body>
+
+</html>
