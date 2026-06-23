@@ -5,8 +5,8 @@
     <description>Tech blog on AI, ServiceNow, and cloud engineering</description>
     <link>https://avocado-planet.github.io/</link>
     <atom:link href="https://avocado-planet.github.io/feed.xml" rel="self" type="application/rss+xml"/>
-    <pubDate>Sun, 21 Jun 2026 13:48:29 +0000</pubDate>
-    <lastBuildDate>Sun, 21 Jun 2026 13:48:29 +0000</lastBuildDate>
+    <pubDate>Tue, 23 Jun 2026 12:56:34 +0000</pubDate>
+    <lastBuildDate>Tue, 23 Jun 2026 12:56:34 +0000</lastBuildDate>
     <generator>Jekyll v3.10.0</generator><item>
         <title>AI Agentのメモリ設計 深掘り編：依存関係・挿入戦略・更新コスト</title>
         <description>&lt;p&gt;前回の記事（&lt;a href=&quot;/blog/2026/06/20/ai-agent-cli-memory.html&quot;&gt;AI Agent CLIのメモリ設計：Claude Codeはどうやって「あなた」を覚えているのか&lt;/a&gt;）では、メモリの3層構造・CLAUDE.md・更新タイミングの基礎を整理した。&lt;/p&gt;
@@ -471,13 +471,7 @@ DBを更新
 
 &lt;p&gt;AIアプリケーションが外部ツールにアクセスするには、従来はツールごとに個別のインテグレーションコードを書く必要があった。N個のAIアプリ × M個のツール = N×M個のカスタム実装が必要になる、いわゆる &lt;strong&gt;N×M問題&lt;/strong&gt; が存在していた。&lt;/p&gt;
 
-&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;【従来】                          【MCP導入後】
-AI App A ──独自実装──→ Tool 1     AI App A ─┐
-AI App A ──独自実装──→ Tool 2               ├── MCP ──→ Tool 1
-AI App B ──独自実装──→ Tool 1               ├── MCP ──→ Tool 2
-AI App B ──独自実装──→ Tool 2     AI App B ─┘         → Tool 3
-  (N×M個のカスタム実装)             (統一プロトコル)
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+&lt;p&gt;&lt;img src=&quot;/blog/assets/img/mcp-nx-m-problem.svg&quot; alt=&quot;N×M問題とMCP&quot; /&gt;&lt;/p&gt;
 
 &lt;p&gt;HTTPがWeb通信を標準化したように、MCPはAIアプリとツール間の通信を標準化する。一度MCPサーバーを作れば、どのMCPホストからでも利用できる。&lt;/p&gt;
 
@@ -487,24 +481,7 @@ AI App B ──独自実装──→ Tool 2     AI App B ─┘         → Tool
 
 &lt;p&gt;MCPは &lt;strong&gt;Host-Client-Server&lt;/strong&gt; の3つの役割で構成される。前回の記事では「クライアント」と「サーバー」の通信にフォーカスしたが、実はその上に &lt;strong&gt;Host&lt;/strong&gt; というレイヤーがある。&lt;/p&gt;
 
-&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;┌─────────────────────────────────────────────────────┐
-│                 MCP Host（例: Claude Desktop）         │
-│                                                       │
-│   ┌──────────┐  ┌──────────┐  ┌──────────┐          │
-│   │ Client 1 │  │ Client 2 │  │ Client 3 │   [LLM]  │
-│   └────┬─────┘  └────┬─────┘  └────┬─────┘          │
-│        │              │              │                │
-└────────┼──────────────┼──────────────┼────────────────┘
-         │              │              │
-   ┌─────▼─────┐ ┌─────▼─────┐ ┌─────▼─────┐
-   │ Server A  │ │ Server B  │ │ Server C  │
-   │ (Files)   │ │ (DB)      │ │ (Sentry)  │
-   │ [ローカル] │ │ [ローカル] │ │ [リモート] │
-   └─────┬─────┘ └─────┬─────┘ └─────┬─────┘
-         │              │              │
-    ローカル         ローカル       外部API
-    ファイル         データベース    (Internet)
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+&lt;p&gt;&lt;img src=&quot;/blog/assets/img/mcp-host-client-server.svg&quot; alt=&quot;Host-Client-Server構造&quot; /&gt;&lt;/p&gt;
 
 &lt;h3 id=&quot;mcp-hostホスト&quot;&gt;MCP Host（ホスト）&lt;/h3&gt;
 
@@ -671,56 +648,7 @@ Client: Serverからプロンプトテンプレートを取得
 
 &lt;p&gt;Anthropic Academyの「Claude with Amazon Bedrock」コースのMCPモジュールでは、MCPの処理フローを6つのアクターで表現している。以下はその教材のシーケンス図を元に整理したもの。&lt;/p&gt;
 
-&lt;p&gt;&lt;img src=&quot;/blog/assets/img/mcp-sequence-diagram.png&quot; alt=&quot;MCP Sequence Diagram&quot; /&gt;&lt;/p&gt;
-
-&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;  User      Our Server    MCP Client    MCP Server     Claude       GitHub
-   │             │              │              │           │            │
-   │ &quot;What       │              │              │           │            │
-   │ repositories│              │              │           │            │
-   │ do I have?&quot; │              │              │           │            │
-   ├────────────→│              │              │           │            │
-   │             │              │              │           │            │
-   │             │ I need a list│              │           │            │
-   │             │ of tools to  │              │           │            │
-   │             │ send to Claude              │           │            │
-   │             ├─────────────→│              │           │            │
-   │             │              │              │           │            │
-   │             │              │ [ListToolsRequest]       │            │
-   │             │              ├─────────────→│           │            │
-   │             │              │              │           │            │
-   │             │ Here are     │ [ListToolsResult]        │            │
-   │             │ the tools    │←─────────────┤           │            │
-   │             │              │              │           │            │
-   │             │ [Query + Tools]              │           │            │
-   │             ├─────────────────────────────────────────→│            │
-   │             │              │              │           │            │
-   │             │              │              │ [ToolUse]  │            │
-   │             │←────────────────────────────────────────┤            │
-   │             │              │              │           │            │
-   │             │ Please run   │ [CallToolRequest]        │            │
-   │             │ this tool    │              │           │            │
-   │             ├─────────────→├─────────────→│           │            │
-   │             │              │              │  Request to GitHub     │
-   │             │              │              ├──────────────────────→ │
-   │             │              │              │           │            │
-   │             │              │              │           │  Response  │
-   │             │              │              │←─────────────────────┤
-   │             │              │              │           │            │
-   │             │ Here&apos;s the   │ [CallToolResult]         │            │
-   │             │ result of    │←─────────────┤           │            │
-   │             │ running tool │              │           │            │
-   │             │              │              │           │            │
-   │             │ [toolResult] │              │           │            │
-   │             │←─────────────┤              │           │            │
-   │             │              │              │           │            │
-   │             ├─────────────────────────────────────────→│            │
-   │             │←────────────────────────────────────────┤            │
-   │             │              │              │           │            │
-   │ &quot;Your       │              │              │           │            │
-   │ repositories│              │              │           │            │
-   │ are...&quot;     │              │              │           │            │
-   │←────────────┤              │              │           │            │
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
+&lt;p&gt;&lt;img src=&quot;/blog/assets/img/mcp-sequence-diagram.svg&quot; alt=&quot;MCPシーケンス図&quot; /&gt;&lt;/p&gt;
 
 &lt;h3 id=&quot;4フェーズの解説&quot;&gt;4フェーズの解説&lt;/h3&gt;
 
@@ -730,12 +658,12 @@ Client: Serverからプロンプトテンプレートを取得
 
 &lt;ol&gt;
   &lt;li&gt;ユーザーが「What repositories do I have?」と質問&lt;/li&gt;
-  &lt;li&gt;Our Server が MCP Client にツール一覧を要求&lt;/li&gt;
+  &lt;li&gt;App Server（オーケストレータ）が MCP Client に &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tools/list&lt;/code&gt; を依頼 — Claudeにツール定義を渡すために必要なため&lt;/li&gt;
   &lt;li&gt;MCP Client が MCP Server に &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ListToolsRequest&lt;/code&gt; を送信&lt;/li&gt;
   &lt;li&gt;MCP Server が &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ListToolsResult&lt;/code&gt; で利用可能なツール（名前、説明、パラメータスキーマ）を返す&lt;/li&gt;
 &lt;/ol&gt;
 
-&lt;p&gt;前回の記事の &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;get_tools()&lt;/code&gt; に相当するフェーズ。&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;ポイント&lt;/strong&gt;: ツール一覧を「要求する」のはMCP Clientであり、「なぜ要求するか」を判断するのはApp Server（LLMオーケストレータ）だ。ClaudeはツールリストをApp Server経由で受け取るまで何が使えるか知らない。前回の記事の &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;get_tools()&lt;/code&gt; に相当するフェーズ。&lt;/p&gt;
 
 &lt;h4 id=&quot;フェーズb-llm推論llm-reasoning&quot;&gt;フェーズB: LLM推論（LLM Reasoning）&lt;/h4&gt;
 

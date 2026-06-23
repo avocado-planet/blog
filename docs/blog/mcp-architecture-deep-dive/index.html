@@ -55,7 +55,7 @@
       <div class="container">
          <article class="post"><header>
     <h1 class="postTitle">MCPアーキテクチャ深掘り：Host-Client-Server構造、3つのプリミティブ、処理シーケンス</h1>
-    <p class="meta">May 28, 2026 | <span class="time">6</span> Minute Read</p>
+    <p class="meta">May 28, 2026 | <span class="time">4</span> Minute Read</p>
   </header>
 
   <p>前回の記事（<a href="https://avocado-planet.github.io/blog/blog/mcp-stdio-sse-dataflow/">MCPの仕組みを理解する：SSE・Stdio通信からLLMとのデータフローまで</a>）では、MCPの通信方式（SSE/Stdio）、JSON-RPCの流れ、LLMとのデータフロー、プロセスのライフサイクルを整理した。</p>
@@ -70,13 +70,7 @@
 
 <p>AIアプリケーションが外部ツールにアクセスするには、従来はツールごとに個別のインテグレーションコードを書く必要があった。N個のAIアプリ × M個のツール = N×M個のカスタム実装が必要になる、いわゆる <strong>N×M問題</strong> が存在していた。</p>
 
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>【従来】                          【MCP導入後】
-AI App A ──独自実装──→ Tool 1     AI App A ─┐
-AI App A ──独自実装──→ Tool 2               ├── MCP ──→ Tool 1
-AI App B ──独自実装──→ Tool 1               ├── MCP ──→ Tool 2
-AI App B ──独自実装──→ Tool 2     AI App B ─┘         → Tool 3
-  (N×M個のカスタム実装)             (統一プロトコル)
-</code></pre></div></div>
+<p><img src="/blog/assets/img/mcp-nx-m-problem.svg" alt="N×M問題とMCP" /></p>
 
 <p>HTTPがWeb通信を標準化したように、MCPはAIアプリとツール間の通信を標準化する。一度MCPサーバーを作れば、どのMCPホストからでも利用できる。</p>
 
@@ -86,24 +80,7 @@ AI App B ──独自実装──→ Tool 2     AI App B ─┘         → Tool
 
 <p>MCPは <strong>Host-Client-Server</strong> の3つの役割で構成される。前回の記事では「クライアント」と「サーバー」の通信にフォーカスしたが、実はその上に <strong>Host</strong> というレイヤーがある。</p>
 
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>┌─────────────────────────────────────────────────────┐
-│                 MCP Host（例: Claude Desktop）         │
-│                                                       │
-│   ┌──────────┐  ┌──────────┐  ┌──────────┐          │
-│   │ Client 1 │  │ Client 2 │  │ Client 3 │   [LLM]  │
-│   └────┬─────┘  └────┬─────┘  └────┬─────┘          │
-│        │              │              │                │
-└────────┼──────────────┼──────────────┼────────────────┘
-         │              │              │
-   ┌─────▼─────┐ ┌─────▼─────┐ ┌─────▼─────┐
-   │ Server A  │ │ Server B  │ │ Server C  │
-   │ (Files)   │ │ (DB)      │ │ (Sentry)  │
-   │ [ローカル] │ │ [ローカル] │ │ [リモート] │
-   └─────┬─────┘ └─────┬─────┘ └─────┬─────┘
-         │              │              │
-    ローカル         ローカル       外部API
-    ファイル         データベース    (Internet)
-</code></pre></div></div>
+<p><img src="/blog/assets/img/mcp-host-client-server.svg" alt="Host-Client-Server構造" /></p>
 
 <h3 id="mcp-hostホスト">MCP Host（ホスト）</h3>
 
@@ -270,56 +247,7 @@ Client: Serverからプロンプトテンプレートを取得
 
 <p>Anthropic Academyの「Claude with Amazon Bedrock」コースのMCPモジュールでは、MCPの処理フローを6つのアクターで表現している。以下はその教材のシーケンス図を元に整理したもの。</p>
 
-<p><img src="/blog/assets/img/mcp-sequence-diagram.png" alt="MCP Sequence Diagram" /></p>
-
-<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>  User      Our Server    MCP Client    MCP Server     Claude       GitHub
-   │             │              │              │           │            │
-   │ "What       │              │              │           │            │
-   │ repositories│              │              │           │            │
-   │ do I have?" │              │              │           │            │
-   ├────────────→│              │              │           │            │
-   │             │              │              │           │            │
-   │             │ I need a list│              │           │            │
-   │             │ of tools to  │              │           │            │
-   │             │ send to Claude              │           │            │
-   │             ├─────────────→│              │           │            │
-   │             │              │              │           │            │
-   │             │              │ [ListToolsRequest]       │            │
-   │             │              ├─────────────→│           │            │
-   │             │              │              │           │            │
-   │             │ Here are     │ [ListToolsResult]        │            │
-   │             │ the tools    │←─────────────┤           │            │
-   │             │              │              │           │            │
-   │             │ [Query + Tools]              │           │            │
-   │             ├─────────────────────────────────────────→│            │
-   │             │              │              │           │            │
-   │             │              │              │ [ToolUse]  │            │
-   │             │←────────────────────────────────────────┤            │
-   │             │              │              │           │            │
-   │             │ Please run   │ [CallToolRequest]        │            │
-   │             │ this tool    │              │           │            │
-   │             ├─────────────→├─────────────→│           │            │
-   │             │              │              │  Request to GitHub     │
-   │             │              │              ├──────────────────────→ │
-   │             │              │              │           │            │
-   │             │              │              │           │  Response  │
-   │             │              │              │←─────────────────────┤
-   │             │              │              │           │            │
-   │             │ Here's the   │ [CallToolResult]         │            │
-   │             │ result of    │←─────────────┤           │            │
-   │             │ running tool │              │           │            │
-   │             │              │              │           │            │
-   │             │ [toolResult] │              │           │            │
-   │             │←─────────────┤              │           │            │
-   │             │              │              │           │            │
-   │             ├─────────────────────────────────────────→│            │
-   │             │←────────────────────────────────────────┤            │
-   │             │              │              │           │            │
-   │ "Your       │              │              │           │            │
-   │ repositories│              │              │           │            │
-   │ are..."     │              │              │           │            │
-   │←────────────┤              │              │           │            │
-</code></pre></div></div>
+<p><img src="/blog/assets/img/mcp-sequence-diagram.svg" alt="MCPシーケンス図" /></p>
 
 <h3 id="4フェーズの解説">4フェーズの解説</h3>
 
@@ -329,12 +257,12 @@ Client: Serverからプロンプトテンプレートを取得
 
 <ol>
   <li>ユーザーが「What repositories do I have?」と質問</li>
-  <li>Our Server が MCP Client にツール一覧を要求</li>
+  <li>App Server（オーケストレータ）が MCP Client に <code class="language-plaintext highlighter-rouge">tools/list</code> を依頼 — Claudeにツール定義を渡すために必要なため</li>
   <li>MCP Client が MCP Server に <code class="language-plaintext highlighter-rouge">ListToolsRequest</code> を送信</li>
   <li>MCP Server が <code class="language-plaintext highlighter-rouge">ListToolsResult</code> で利用可能なツール（名前、説明、パラメータスキーマ）を返す</li>
 </ol>
 
-<p>前回の記事の <code class="language-plaintext highlighter-rouge">get_tools()</code> に相当するフェーズ。</p>
+<p><strong>ポイント</strong>: ツール一覧を「要求する」のはMCP Clientであり、「なぜ要求するか」を判断するのはApp Server（LLMオーケストレータ）だ。ClaudeはツールリストをApp Server経由で受け取るまで何が使えるか知らない。前回の記事の <code class="language-plaintext highlighter-rouge">get_tools()</code> に相当するフェーズ。</p>
 
 <h4 id="フェーズb-llm推論llm-reasoning">フェーズB: LLM推論（LLM Reasoning）</h4>
 
