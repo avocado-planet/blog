@@ -144,62 +144,56 @@ Client: Serverからプロンプトテンプレートを取得
 
 ---
 
-## 処理シーケンス — Anthropic Academy教材ベース
+## 処理シーケンス
 
-Anthropic Academyの「Claude with Amazon Bedrock」コースのMCPモジュールでは、MCPの処理フローを6つのアクターで表現している。以下はその教材のシーケンス図を元に整理したもの。
+登場人物は5つ。**User、Host/LLM（Claude Desktop等）、MCP Client、MCP Server、外部API（GitHub）** だ。
 
 ![MCPシーケンス図](/blog/assets/img/mcp-sequence-diagram.svg)
 
 ### 4フェーズの解説
 
-このフローは **フェーズA（ツール発見）→ B（LLM推論）→ C（ツール実行）→ D（回答生成）** の4段階に分かれる。
-
 #### フェーズA: ツール発見（Tool Discovery）
 
 1. ユーザーが「What repositories do I have?」と質問
-2. App Server（オーケストレータ）が MCP Client に `tools/list` を依頼 — Claudeにツール定義を渡すために必要なため
+2. Host/LLM が MCP Client に `tools/list` を送る — LLMが何のツールを使えるか知るために必要
 3. MCP Client が MCP Server に `ListToolsRequest` を送信
-4. MCP Server が `ListToolsResult` で利用可能なツール（名前、説明、パラメータスキーマ）を返す
+4. MCP Server が `ListToolsResult`（ツール名・説明・引数スキーマ）を返す
 
-**ポイント**: ツール一覧を「要求する」のはMCP Clientであり、「なぜ要求するか」を判断するのはApp Server（LLMオーケストレータ）だ。ClaudeはツールリストをApp Server経由で受け取るまで何が使えるか知らない。前回の記事の `get_tools()` に相当するフェーズ。
+**ポイント**: LLMはツール一覧を受け取るまで「何が使えるか」を知らない。前回の記事の `get_tools()` に相当するフェーズ。
 
 #### フェーズB: LLM推論（LLM Reasoning）
 
-5. App Server が Claude に **ユーザーの質問 + ツール定義** をまとめて送信（`Query + Tools`）
-6. Claude が `ToolUse` を返す — 「`list_repositories` ツールを呼ぶべきだ」と自律的に判断
+5. MCP Client がツール定義を Host/LLM に渡す
+6. Host/LLM が内部で推論 — 「`list_repositories` ツールを呼ぶべきだ」と自律的に判断
 
-前回の記事の `ainvoke()` → ReActループの「ツール選択」に相当する。
+前回の記事の ReActループの「ツール選択」に相当する。
 
 #### フェーズC: ツール実行（Tool Execution）
 
-7. App Server が MCP Client にツール実行を依頼
+7. Host/LLM が MCP Client にツール実行を指示
 8. MCP Client が MCP Server に `CallToolRequest` を送信
-9. MCP Server が実際のGitHub APIを呼び出す
+9. MCP Server が実際の GitHub API を呼び出す
 10. GitHub がレスポンスを返す
 11. MCP Server が `CallToolResult` で結果を返す
-12. MCP Client が App Server に `toolResult` を返す
+12. MCP Client が Host/LLM に結果を渡す
 
-前回の記事の `tools/call` → JSON-RPCのやり取りがこのフェーズに当たる。
+前回の記事の `tools/call` に相当するフェーズ。
 
 #### フェーズD: 回答生成（Response Generation）
 
-13. App Server がツール結果を Claude に送信
-14. Claude が自然言語で「Your repositories are...」と回答を生成
-15. ユーザーに最終回答を表示
+13. Host/LLM がツール結果を自然言語に変換
+14. ユーザーに「Your repositories are...」と返答
 
 ### MCPプロトコルメッセージ一覧
 
 | メッセージ | 方向 | 役割 |
 |-----------|------|------|
-| `ListToolsRequest` | Client → Server | サーバーが公開する全ツールの一覧を要求 |
-| `ListToolsResult` | Server → Client | ツール名・説明・引数スキーマの一覧を返却 |
-| `Query + Tools` | App Server → Claude | ユーザーの質問 + ツール定義をLLMに提示 |
-| `ToolUse` | Claude → App Server | LLMが選んだツール名と引数 |
-| `CallToolRequest` | Client → Server | 指定ツールを指定引数で実行するリクエスト |
-| `CallToolResult` | Server → Client | ツール実行結果 |
-| `toolResult` | Client → App Server | 実行結果をアプリケーション側に返す |
+| `ListToolsRequest` | MCP Client → Server | 利用可能なツール一覧を要求 |
+| `ListToolsResult` | MCP Server → Client | ツール名・説明・引数スキーマを返す |
+| `CallToolRequest` | MCP Client → Server | 指定ツールを指定引数で実行 |
+| `CallToolResult` | MCP Server → Client | ツール実行結果を返す |
 
-このフローで重要なのは、**Claudeはツールの「選択と引数の決定」だけを行い、実際の実行はMCP Server側で行われる** という責務の分離。LLMは外部APIに直接アクセスせず、MCPプロトコルを介した安全な間接アクセスとなっている。
+重要なのは **LLMはツールの「選択と引数の決定」だけを行い、実際の実行はMCP Server** が担う点だ。LLMは外部APIに直接触れず、MCPプロトコルを介した安全な間接アクセスとなっている。
 
 ---
 
