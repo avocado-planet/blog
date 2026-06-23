@@ -55,7 +55,7 @@
       <div class="container">
          <article class="post"><header>
     <h1 class="postTitle">MCPアーキテクチャ深掘り：Host-Client-Server構造、3つのプリミティブ、処理シーケンス</h1>
-    <p class="meta">May 28, 2026 | <span class="time">4</span> Minute Read</p>
+    <p class="meta">May 28, 2026 | <span class="time">3</span> Minute Read</p>
   </header>
 
   <p>前回の記事（<a href="https://avocado-planet.github.io/blog/blog/mcp-stdio-sse-dataflow/">MCPの仕組みを理解する：SSE・Stdio通信からLLMとのデータフローまで</a>）では、MCPの通信方式（SSE/Stdio）、JSON-RPCの流れ、LLMとのデータフロー、プロセスのライフサイクルを整理した。</p>
@@ -243,55 +243,52 @@ Client: Serverからプロンプトテンプレートを取得
 
 <hr />
 
-<h2 id="処理シーケンス--anthropic-academy教材ベース">処理シーケンス — Anthropic Academy教材ベース</h2>
+<h2 id="処理シーケンス">処理シーケンス</h2>
 
-<p>Anthropic Academyの「Claude with Amazon Bedrock」コースのMCPモジュールでは、MCPの処理フローを6つのアクターで表現している。以下はその教材のシーケンス図を元に整理したもの。</p>
+<p>登場人物は5つ。<strong>User、Host/LLM（Claude Desktop等）、MCP Client、MCP Server、外部API（GitHub）</strong> だ。</p>
 
 <p><img src="/blog/assets/img/mcp-sequence-diagram.svg" alt="MCPシーケンス図" /></p>
 
 <h3 id="4フェーズの解説">4フェーズの解説</h3>
 
-<p>このフローは <strong>フェーズA（ツール発見）→ B（LLM推論）→ C（ツール実行）→ D（回答生成）</strong> の4段階に分かれる。</p>
-
 <h4 id="フェーズa-ツール発見tool-discovery">フェーズA: ツール発見（Tool Discovery）</h4>
 
 <ol>
   <li>ユーザーが「What repositories do I have?」と質問</li>
-  <li>App Server（オーケストレータ）が MCP Client に <code class="language-plaintext highlighter-rouge">tools/list</code> を依頼 — Claudeにツール定義を渡すために必要なため</li>
+  <li>Host/LLM が MCP Client に <code class="language-plaintext highlighter-rouge">tools/list</code> を送る — LLMが何のツールを使えるか知るために必要</li>
   <li>MCP Client が MCP Server に <code class="language-plaintext highlighter-rouge">ListToolsRequest</code> を送信</li>
-  <li>MCP Server が <code class="language-plaintext highlighter-rouge">ListToolsResult</code> で利用可能なツール（名前、説明、パラメータスキーマ）を返す</li>
+  <li>MCP Server が <code class="language-plaintext highlighter-rouge">ListToolsResult</code>（ツール名・説明・引数スキーマ）を返す</li>
 </ol>
 
-<p><strong>ポイント</strong>: ツール一覧を「要求する」のはMCP Clientであり、「なぜ要求するか」を判断するのはApp Server（LLMオーケストレータ）だ。ClaudeはツールリストをApp Server経由で受け取るまで何が使えるか知らない。前回の記事の <code class="language-plaintext highlighter-rouge">get_tools()</code> に相当するフェーズ。</p>
+<p><strong>ポイント</strong>: LLMはツール一覧を受け取るまで「何が使えるか」を知らない。前回の記事の <code class="language-plaintext highlighter-rouge">get_tools()</code> に相当するフェーズ。</p>
 
 <h4 id="フェーズb-llm推論llm-reasoning">フェーズB: LLM推論（LLM Reasoning）</h4>
 
 <ol>
-  <li>App Server が Claude に <strong>ユーザーの質問 + ツール定義</strong> をまとめて送信（<code class="language-plaintext highlighter-rouge">Query + Tools</code>）</li>
-  <li>Claude が <code class="language-plaintext highlighter-rouge">ToolUse</code> を返す — 「<code class="language-plaintext highlighter-rouge">list_repositories</code> ツールを呼ぶべきだ」と自律的に判断</li>
+  <li>MCP Client がツール定義を Host/LLM に渡す</li>
+  <li>Host/LLM が内部で推論 — 「<code class="language-plaintext highlighter-rouge">list_repositories</code> ツールを呼ぶべきだ」と自律的に判断</li>
 </ol>
 
-<p>前回の記事の <code class="language-plaintext highlighter-rouge">ainvoke()</code> → ReActループの「ツール選択」に相当する。</p>
+<p>前回の記事の ReActループの「ツール選択」に相当する。</p>
 
 <h4 id="フェーズc-ツール実行tool-execution">フェーズC: ツール実行（Tool Execution）</h4>
 
 <ol>
-  <li>App Server が MCP Client にツール実行を依頼</li>
+  <li>Host/LLM が MCP Client にツール実行を指示</li>
   <li>MCP Client が MCP Server に <code class="language-plaintext highlighter-rouge">CallToolRequest</code> を送信</li>
-  <li>MCP Server が実際のGitHub APIを呼び出す</li>
+  <li>MCP Server が実際の GitHub API を呼び出す</li>
   <li>GitHub がレスポンスを返す</li>
   <li>MCP Server が <code class="language-plaintext highlighter-rouge">CallToolResult</code> で結果を返す</li>
-  <li>MCP Client が App Server に <code class="language-plaintext highlighter-rouge">toolResult</code> を返す</li>
+  <li>MCP Client が Host/LLM に結果を渡す</li>
 </ol>
 
-<p>前回の記事の <code class="language-plaintext highlighter-rouge">tools/call</code> → JSON-RPCのやり取りがこのフェーズに当たる。</p>
+<p>前回の記事の <code class="language-plaintext highlighter-rouge">tools/call</code> に相当するフェーズ。</p>
 
 <h4 id="フェーズd-回答生成response-generation">フェーズD: 回答生成（Response Generation）</h4>
 
 <ol>
-  <li>App Server がツール結果を Claude に送信</li>
-  <li>Claude が自然言語で「Your repositories are…」と回答を生成</li>
-  <li>ユーザーに最終回答を表示</li>
+  <li>Host/LLM がツール結果を自然言語に変換</li>
+  <li>ユーザーに「Your repositories are…」と返答</li>
 </ol>
 
 <h3 id="mcpプロトコルメッセージ一覧">MCPプロトコルメッセージ一覧</h3>
@@ -307,43 +304,28 @@ Client: Serverからプロンプトテンプレートを取得
   <tbody>
     <tr>
       <td><code class="language-plaintext highlighter-rouge">ListToolsRequest</code></td>
-      <td>Client → Server</td>
-      <td>サーバーが公開する全ツールの一覧を要求</td>
+      <td>MCP Client → Server</td>
+      <td>利用可能なツール一覧を要求</td>
     </tr>
     <tr>
       <td><code class="language-plaintext highlighter-rouge">ListToolsResult</code></td>
-      <td>Server → Client</td>
-      <td>ツール名・説明・引数スキーマの一覧を返却</td>
-    </tr>
-    <tr>
-      <td><code class="language-plaintext highlighter-rouge">Query + Tools</code></td>
-      <td>App Server → Claude</td>
-      <td>ユーザーの質問 + ツール定義をLLMに提示</td>
-    </tr>
-    <tr>
-      <td><code class="language-plaintext highlighter-rouge">ToolUse</code></td>
-      <td>Claude → App Server</td>
-      <td>LLMが選んだツール名と引数</td>
+      <td>MCP Server → Client</td>
+      <td>ツール名・説明・引数スキーマを返す</td>
     </tr>
     <tr>
       <td><code class="language-plaintext highlighter-rouge">CallToolRequest</code></td>
-      <td>Client → Server</td>
-      <td>指定ツールを指定引数で実行するリクエスト</td>
+      <td>MCP Client → Server</td>
+      <td>指定ツールを指定引数で実行</td>
     </tr>
     <tr>
       <td><code class="language-plaintext highlighter-rouge">CallToolResult</code></td>
-      <td>Server → Client</td>
-      <td>ツール実行結果</td>
-    </tr>
-    <tr>
-      <td><code class="language-plaintext highlighter-rouge">toolResult</code></td>
-      <td>Client → App Server</td>
-      <td>実行結果をアプリケーション側に返す</td>
+      <td>MCP Server → Client</td>
+      <td>ツール実行結果を返す</td>
     </tr>
   </tbody>
 </table>
 
-<p>このフローで重要なのは、<strong>Claudeはツールの「選択と引数の決定」だけを行い、実際の実行はMCP Server側で行われる</strong> という責務の分離。LLMは外部APIに直接アクセスせず、MCPプロトコルを介した安全な間接アクセスとなっている。</p>
+<p>重要なのは <strong>LLMはツールの「選択と引数の決定」だけを行い、実際の実行はMCP Server</strong> が担う点だ。LLMは外部APIに直接触れず、MCPプロトコルを介した安全な間接アクセスとなっている。</p>
 
 <hr />
 

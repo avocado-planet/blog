@@ -5,8 +5,8 @@
     <description>Tech blog on AI, ServiceNow, and cloud engineering</description>
     <link>https://avocado-planet.github.io/</link>
     <atom:link href="https://avocado-planet.github.io/feed.xml" rel="self" type="application/rss+xml"/>
-    <pubDate>Tue, 23 Jun 2026 13:05:05 +0000</pubDate>
-    <lastBuildDate>Tue, 23 Jun 2026 13:05:05 +0000</lastBuildDate>
+    <pubDate>Tue, 23 Jun 2026 13:14:07 +0000</pubDate>
+    <lastBuildDate>Tue, 23 Jun 2026 13:14:07 +0000</lastBuildDate>
     <generator>Jekyll v3.10.0</generator><item>
         <title>AI Agentのメモリ設計 深掘り編：依存関係・挿入戦略・更新コスト</title>
         <description>&lt;p&gt;前回の記事（&lt;a href=&quot;/blog/2026/06/20/ai-agent-cli-memory.html&quot;&gt;AI Agent CLIのメモリ設計：Claude Codeはどうやって「あなた」を覚えているのか&lt;/a&gt;）では、メモリの3層構造・CLAUDE.md・更新タイミングの基礎を整理した。&lt;/p&gt;
@@ -644,55 +644,52 @@ Client: Serverからプロンプトテンプレートを取得
 
 &lt;hr /&gt;
 
-&lt;h2 id=&quot;処理シーケンス--anthropic-academy教材ベース&quot;&gt;処理シーケンス — Anthropic Academy教材ベース&lt;/h2&gt;
+&lt;h2 id=&quot;処理シーケンス&quot;&gt;処理シーケンス&lt;/h2&gt;
 
-&lt;p&gt;Anthropic Academyの「Claude with Amazon Bedrock」コースのMCPモジュールでは、MCPの処理フローを6つのアクターで表現している。以下はその教材のシーケンス図を元に整理したもの。&lt;/p&gt;
+&lt;p&gt;登場人物は5つ。&lt;strong&gt;User、Host/LLM（Claude Desktop等）、MCP Client、MCP Server、外部API（GitHub）&lt;/strong&gt; だ。&lt;/p&gt;
 
 &lt;p&gt;&lt;img src=&quot;/blog/assets/img/mcp-sequence-diagram.svg&quot; alt=&quot;MCPシーケンス図&quot; /&gt;&lt;/p&gt;
 
 &lt;h3 id=&quot;4フェーズの解説&quot;&gt;4フェーズの解説&lt;/h3&gt;
 
-&lt;p&gt;このフローは &lt;strong&gt;フェーズA（ツール発見）→ B（LLM推論）→ C（ツール実行）→ D（回答生成）&lt;/strong&gt; の4段階に分かれる。&lt;/p&gt;
-
 &lt;h4 id=&quot;フェーズa-ツール発見tool-discovery&quot;&gt;フェーズA: ツール発見（Tool Discovery）&lt;/h4&gt;
 
 &lt;ol&gt;
   &lt;li&gt;ユーザーが「What repositories do I have?」と質問&lt;/li&gt;
-  &lt;li&gt;App Server（オーケストレータ）が MCP Client に &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tools/list&lt;/code&gt; を依頼 — Claudeにツール定義を渡すために必要なため&lt;/li&gt;
+  &lt;li&gt;Host/LLM が MCP Client に &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tools/list&lt;/code&gt; を送る — LLMが何のツールを使えるか知るために必要&lt;/li&gt;
   &lt;li&gt;MCP Client が MCP Server に &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ListToolsRequest&lt;/code&gt; を送信&lt;/li&gt;
-  &lt;li&gt;MCP Server が &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ListToolsResult&lt;/code&gt; で利用可能なツール（名前、説明、パラメータスキーマ）を返す&lt;/li&gt;
+  &lt;li&gt;MCP Server が &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ListToolsResult&lt;/code&gt;（ツール名・説明・引数スキーマ）を返す&lt;/li&gt;
 &lt;/ol&gt;
 
-&lt;p&gt;&lt;strong&gt;ポイント&lt;/strong&gt;: ツール一覧を「要求する」のはMCP Clientであり、「なぜ要求するか」を判断するのはApp Server（LLMオーケストレータ）だ。ClaudeはツールリストをApp Server経由で受け取るまで何が使えるか知らない。前回の記事の &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;get_tools()&lt;/code&gt; に相当するフェーズ。&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;ポイント&lt;/strong&gt;: LLMはツール一覧を受け取るまで「何が使えるか」を知らない。前回の記事の &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;get_tools()&lt;/code&gt; に相当するフェーズ。&lt;/p&gt;
 
 &lt;h4 id=&quot;フェーズb-llm推論llm-reasoning&quot;&gt;フェーズB: LLM推論（LLM Reasoning）&lt;/h4&gt;
 
 &lt;ol&gt;
-  &lt;li&gt;App Server が Claude に &lt;strong&gt;ユーザーの質問 + ツール定義&lt;/strong&gt; をまとめて送信（&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Query + Tools&lt;/code&gt;）&lt;/li&gt;
-  &lt;li&gt;Claude が &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ToolUse&lt;/code&gt; を返す — 「&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;list_repositories&lt;/code&gt; ツールを呼ぶべきだ」と自律的に判断&lt;/li&gt;
+  &lt;li&gt;MCP Client がツール定義を Host/LLM に渡す&lt;/li&gt;
+  &lt;li&gt;Host/LLM が内部で推論 — 「&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;list_repositories&lt;/code&gt; ツールを呼ぶべきだ」と自律的に判断&lt;/li&gt;
 &lt;/ol&gt;
 
-&lt;p&gt;前回の記事の &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ainvoke()&lt;/code&gt; → ReActループの「ツール選択」に相当する。&lt;/p&gt;
+&lt;p&gt;前回の記事の ReActループの「ツール選択」に相当する。&lt;/p&gt;
 
 &lt;h4 id=&quot;フェーズc-ツール実行tool-execution&quot;&gt;フェーズC: ツール実行（Tool Execution）&lt;/h4&gt;
 
 &lt;ol&gt;
-  &lt;li&gt;App Server が MCP Client にツール実行を依頼&lt;/li&gt;
+  &lt;li&gt;Host/LLM が MCP Client にツール実行を指示&lt;/li&gt;
   &lt;li&gt;MCP Client が MCP Server に &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;CallToolRequest&lt;/code&gt; を送信&lt;/li&gt;
-  &lt;li&gt;MCP Server が実際のGitHub APIを呼び出す&lt;/li&gt;
+  &lt;li&gt;MCP Server が実際の GitHub API を呼び出す&lt;/li&gt;
   &lt;li&gt;GitHub がレスポンスを返す&lt;/li&gt;
   &lt;li&gt;MCP Server が &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;CallToolResult&lt;/code&gt; で結果を返す&lt;/li&gt;
-  &lt;li&gt;MCP Client が App Server に &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;toolResult&lt;/code&gt; を返す&lt;/li&gt;
+  &lt;li&gt;MCP Client が Host/LLM に結果を渡す&lt;/li&gt;
 &lt;/ol&gt;
 
-&lt;p&gt;前回の記事の &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tools/call&lt;/code&gt; → JSON-RPCのやり取りがこのフェーズに当たる。&lt;/p&gt;
+&lt;p&gt;前回の記事の &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tools/call&lt;/code&gt; に相当するフェーズ。&lt;/p&gt;
 
 &lt;h4 id=&quot;フェーズd-回答生成response-generation&quot;&gt;フェーズD: 回答生成（Response Generation）&lt;/h4&gt;
 
 &lt;ol&gt;
-  &lt;li&gt;App Server がツール結果を Claude に送信&lt;/li&gt;
-  &lt;li&gt;Claude が自然言語で「Your repositories are…」と回答を生成&lt;/li&gt;
-  &lt;li&gt;ユーザーに最終回答を表示&lt;/li&gt;
+  &lt;li&gt;Host/LLM がツール結果を自然言語に変換&lt;/li&gt;
+  &lt;li&gt;ユーザーに「Your repositories are…」と返答&lt;/li&gt;
 &lt;/ol&gt;
 
 &lt;h3 id=&quot;mcpプロトコルメッセージ一覧&quot;&gt;MCPプロトコルメッセージ一覧&lt;/h3&gt;
@@ -708,43 +705,28 @@ Client: Serverからプロンプトテンプレートを取得
   &lt;tbody&gt;
     &lt;tr&gt;
       &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ListToolsRequest&lt;/code&gt;&lt;/td&gt;
-      &lt;td&gt;Client → Server&lt;/td&gt;
-      &lt;td&gt;サーバーが公開する全ツールの一覧を要求&lt;/td&gt;
+      &lt;td&gt;MCP Client → Server&lt;/td&gt;
+      &lt;td&gt;利用可能なツール一覧を要求&lt;/td&gt;
     &lt;/tr&gt;
     &lt;tr&gt;
       &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ListToolsResult&lt;/code&gt;&lt;/td&gt;
-      &lt;td&gt;Server → Client&lt;/td&gt;
-      &lt;td&gt;ツール名・説明・引数スキーマの一覧を返却&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Query + Tools&lt;/code&gt;&lt;/td&gt;
-      &lt;td&gt;App Server → Claude&lt;/td&gt;
-      &lt;td&gt;ユーザーの質問 + ツール定義をLLMに提示&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ToolUse&lt;/code&gt;&lt;/td&gt;
-      &lt;td&gt;Claude → App Server&lt;/td&gt;
-      &lt;td&gt;LLMが選んだツール名と引数&lt;/td&gt;
+      &lt;td&gt;MCP Server → Client&lt;/td&gt;
+      &lt;td&gt;ツール名・説明・引数スキーマを返す&lt;/td&gt;
     &lt;/tr&gt;
     &lt;tr&gt;
       &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;CallToolRequest&lt;/code&gt;&lt;/td&gt;
-      &lt;td&gt;Client → Server&lt;/td&gt;
-      &lt;td&gt;指定ツールを指定引数で実行するリクエスト&lt;/td&gt;
+      &lt;td&gt;MCP Client → Server&lt;/td&gt;
+      &lt;td&gt;指定ツールを指定引数で実行&lt;/td&gt;
     &lt;/tr&gt;
     &lt;tr&gt;
       &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;CallToolResult&lt;/code&gt;&lt;/td&gt;
-      &lt;td&gt;Server → Client&lt;/td&gt;
-      &lt;td&gt;ツール実行結果&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;toolResult&lt;/code&gt;&lt;/td&gt;
-      &lt;td&gt;Client → App Server&lt;/td&gt;
-      &lt;td&gt;実行結果をアプリケーション側に返す&lt;/td&gt;
+      &lt;td&gt;MCP Server → Client&lt;/td&gt;
+      &lt;td&gt;ツール実行結果を返す&lt;/td&gt;
     &lt;/tr&gt;
   &lt;/tbody&gt;
 &lt;/table&gt;
 
-&lt;p&gt;このフローで重要なのは、&lt;strong&gt;Claudeはツールの「選択と引数の決定」だけを行い、実際の実行はMCP Server側で行われる&lt;/strong&gt; という責務の分離。LLMは外部APIに直接アクセスせず、MCPプロトコルを介した安全な間接アクセスとなっている。&lt;/p&gt;
+&lt;p&gt;重要なのは &lt;strong&gt;LLMはツールの「選択と引数の決定」だけを行い、実際の実行はMCP Server&lt;/strong&gt; が担う点だ。LLMは外部APIに直接触れず、MCPプロトコルを介した安全な間接アクセスとなっている。&lt;/p&gt;
 
 &lt;hr /&gt;
 
