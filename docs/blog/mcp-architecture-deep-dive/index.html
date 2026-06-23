@@ -267,7 +267,7 @@ Client: Serverからプロンプトテンプレートを取得
 <h4 id="フェーズb-llm推論llm-reasoning">フェーズB: LLM推論（LLM Reasoning）</h4>
 
 <ol>
-  <li>Our Server が Claude に <strong>ユーザーの質問 + ツール定義</strong> をまとめて送信（<code class="language-plaintext highlighter-rouge">Query + Tools</code>）</li>
+  <li>App Server が Claude に <strong>ユーザーの質問 + ツール定義</strong> をまとめて送信（<code class="language-plaintext highlighter-rouge">Query + Tools</code>）</li>
   <li>Claude が <code class="language-plaintext highlighter-rouge">ToolUse</code> を返す — 「<code class="language-plaintext highlighter-rouge">list_repositories</code> ツールを呼ぶべきだ」と自律的に判断</li>
 </ol>
 
@@ -276,12 +276,12 @@ Client: Serverからプロンプトテンプレートを取得
 <h4 id="フェーズc-ツール実行tool-execution">フェーズC: ツール実行（Tool Execution）</h4>
 
 <ol>
-  <li>Our Server が MCP Client にツール実行を依頼</li>
+  <li>App Server が MCP Client にツール実行を依頼</li>
   <li>MCP Client が MCP Server に <code class="language-plaintext highlighter-rouge">CallToolRequest</code> を送信</li>
   <li>MCP Server が実際のGitHub APIを呼び出す</li>
   <li>GitHub がレスポンスを返す</li>
   <li>MCP Server が <code class="language-plaintext highlighter-rouge">CallToolResult</code> で結果を返す</li>
-  <li>MCP Client が Our Server に <code class="language-plaintext highlighter-rouge">toolResult</code> を返す</li>
+  <li>MCP Client が App Server に <code class="language-plaintext highlighter-rouge">toolResult</code> を返す</li>
 </ol>
 
 <p>前回の記事の <code class="language-plaintext highlighter-rouge">tools/call</code> → JSON-RPCのやり取りがこのフェーズに当たる。</p>
@@ -289,7 +289,7 @@ Client: Serverからプロンプトテンプレートを取得
 <h4 id="フェーズd-回答生成response-generation">フェーズD: 回答生成（Response Generation）</h4>
 
 <ol>
-  <li>Our Server がツール結果を Claude に送信</li>
+  <li>App Server がツール結果を Claude に送信</li>
   <li>Claude が自然言語で「Your repositories are…」と回答を生成</li>
   <li>ユーザーに最終回答を表示</li>
 </ol>
@@ -317,12 +317,12 @@ Client: Serverからプロンプトテンプレートを取得
     </tr>
     <tr>
       <td><code class="language-plaintext highlighter-rouge">Query + Tools</code></td>
-      <td>Our Server → Claude</td>
+      <td>App Server → Claude</td>
       <td>ユーザーの質問 + ツール定義をLLMに提示</td>
     </tr>
     <tr>
       <td><code class="language-plaintext highlighter-rouge">ToolUse</code></td>
-      <td>Claude → Our Server</td>
+      <td>Claude → App Server</td>
       <td>LLMが選んだツール名と引数</td>
     </tr>
     <tr>
@@ -337,7 +337,7 @@ Client: Serverからプロンプトテンプレートを取得
     </tr>
     <tr>
       <td><code class="language-plaintext highlighter-rouge">toolResult</code></td>
-      <td>Client → Our Server</td>
+      <td>Client → App Server</td>
       <td>実行結果をアプリケーション側に返す</td>
     </tr>
   </tbody>
