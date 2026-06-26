@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<!--[if lt IE 7]><html class="no-js lt-ie9 lt-ie8 lt-ie7"><![endif]-->
+<!--[if IE 7]><html class="no-js lt-ie9 lt-ie8" <![endif]-->
+<!--[if IE 8]><html class="no-js lt-ie9" <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js"> <!--<![endif]--><head>
+	<meta charset="utf-8" />
+	<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<meta name="description" content="" />
+	<title>AI Agent CLIの起動時に何が起きているか：MCPハンドシェイクから全体シーケンスまで</title>
+
+	<!-- Open Graph Meta -->
+	<meta content="Avocado Planet" property="og:site_name" /><meta content="AI Agent CLIの起動時に何が起きているか：MCPハンドシェイクから全体シーケンスまで" property="og:title" /><meta content="article" property="og:type" /><meta content="AI Agentが「Ready.」を表示するまでに何をしているのか。設定読み込み、認証、メモリ復元、MCP初期化、システムプロンプト構築まで、起動時の標準フローを整理する。" property="og:description" /><meta content="https://avocado-planet.github.io/blog/blog/ai-agent-startup-sequence/" property="og:url" /><meta
+		content="2026-06-23T00:00:00+00:00"
+		property="article:published_time"
+	/>
+	<meta content="https://avocado-planet.github.io/blog/about/" property="article:author" /><meta
+		content="https://avocado-planet.github.io/blog/assets/img/touring.jpg"
+		property="og:image"
+	/><!-- Twitter Cards -->
+	<meta name="twitter:card" content="summary" />
+	<meta name="twitter:site" content="@" />
+	<meta name="twitter:creator" content="@" /><meta name="twitter:title" content="AI Agent CLIの起動時に何が起きているか：MCPハンドシェイクから全体シーケンスまで" /><meta name="twitter:url" content="https://avocado-planet.github.io/blog/blog/ai-agent-startup-sequence/" /><meta name="twitter:description" content="AI Agentが「Ready.」を表示するまでに何をしているのか。設定読み込み、認証、メモリ復元、MCP初期化、システムプロンプト構築まで、起動時の標準フローを整理する。" /><meta
+		name="twitter:image:src"
+		content="https://avocado-planet.github.io/blog/assets/img/touring.jpg"
+	/><!-- Favicon -->
+	<link rel="icon" type="image/x-icon" href=""/>
+
+	<!-- Come and get me RSS readers -->
+	<link rel="alternate" type="application/rss+xml" title="Avocado Planet"
+	href="https://avocado-planet.github.io/blog/feed.xml" />
+
+	<!-- Stylesheet -->
+	<link rel="stylesheet" href="/blog/assets/css/style.css" />
+
+	<!-- Canonical URL -->
+	<link
+		rel="canonical"
+		href="https://avocado-planet.github.io/blog/blog/ai-agent-startup-sequence/"
+	/></head>
+<body> <div class="header ">
+     <div class="container">
+         <h1 class="logo"><a href="/blog/">Avocado Planet</a></h1>
+         <nav class="nav-collapse">
+             <ul class="noList"><li class="elementfirst">
+                     <a href="/blog/index.html">Home</a>
+                 </li><li class="elementlast">
+                     <a href="/blog/about">About</a>
+                 </li><li> <a href="https://github.com/avocado-planet/" target="_blank">GitHub</a></li>
+             </ul>
+         </nav>
+     </div>
+ </div><!-- end .header -->
+<div class="content">
+      <div class="container">
+         <article class="post"><header>
+    <h1 class="postTitle">AI Agent CLIの起動時に何が起きているか：MCPハンドシェイクから全体シーケンスまで</h1>
+    <p class="meta">June 23, 2026 | <span class="time">6</span> Minute Read</p>
+  </header>
+
+  <p><code class="language-plaintext highlighter-rouge">claude</code> と打ってEnterを押してから <code class="language-plaintext highlighter-rouge">Ready.</code> が出るまでの数秒間に、AI Agentは何をしているのか。</p>
+
+<p>設定読み込み、認証、メモリ復元、MCP接続、システムプロンプト構築 — 全体像を整理する。</p>
+
+<hr />
+
+<h2 id="起動時の全体シーケンス">起動時の全体シーケンス</h2>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>プロセス起動
+    ↓
+① 設定読み込み
+    ↓
+② ロギング初期化
+    ↓
+③ LLM Provider認証
+    ↓
+④ メモリ層の復元
+    ↓
+⑤ MCP / ツール接続
+    ↓
+⑥ システムプロンプト構築
+    ↓
+⑦ ユーザー入力待ち（REPL）
+</code></pre></div></div>
+
+<p>「壊れやすいもの・遅いものを早めにエラーで止める」が設計の基本だ。認証エラーは起動直後に検出できるが、MCPサーバーの応答待ちで5秒固まるとユーザーは何が起きているか分からなくなる。</p>
+
+<hr />
+
+<h2 id="-設定読み込み">① 設定読み込み</h2>
+
+<p>優先順位を持って複数ソースから設定をマージする。</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>CLI引数            （最優先）
+    ↓
+環境変数
+    ↓
+プロジェクト設定（./agent.toml）
+    ↓
+ユーザー設定（~/.agentcli/config.toml）
+    ↓
+デフォルト値       （最後）
+</code></pre></div></div>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">config</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="n">load_defaults</span><span class="p">()</span>
+    <span class="o">|</span> <span class="n">load_user_config</span><span class="p">()</span>
+    <span class="o">|</span> <span class="n">load_project_config</span><span class="p">()</span>
+    <span class="o">|</span> <span class="n">load_env_vars</span><span class="p">()</span>
+    <span class="o">|</span> <span class="n">parse_cli_args</span><span class="p">()</span>
+<span class="p">)</span>
+</code></pre></div></div>
+
+<hr />
+
+<h2 id="-ロギング初期化">② ロギング初期化</h2>
+
+<p>設定で決まったレベル・出力先でロガーをセットアップする。<strong>これを早めにやらないと、以降のステップでエラーが出てもデバッグできない。</strong></p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">logging</span><span class="p">.</span><span class="n">basicConfig</span><span class="p">(</span>
+    <span class="n">level</span><span class="o">=</span><span class="n">config</span><span class="p">.</span><span class="n">log_level</span><span class="p">,</span>
+    <span class="n">handlers</span><span class="o">=</span><span class="p">[</span>
+        <span class="n">FileHandler</span><span class="p">(</span><span class="s">"~/.agentcli/logs/session.log"</span><span class="p">),</span>
+        <span class="n">StreamHandler</span><span class="p">(</span><span class="n">sys</span><span class="p">.</span><span class="n">stderr</span><span class="p">)</span>
+    <span class="p">]</span>
+<span class="p">)</span>
+</code></pre></div></div>
+
+<hr />
+
+<h2 id="-llm-provider認証">③ LLM Provider認証</h2>
+
+<p>API Keyの読み込みと検証。</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">api_key</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="n">os</span><span class="p">.</span><span class="n">getenv</span><span class="p">(</span><span class="s">"ANTHROPIC_API_KEY"</span><span class="p">)</span>
+    <span class="ow">or</span> <span class="n">keyring</span><span class="p">.</span><span class="n">get_password</span><span class="p">(</span><span class="s">"anthropic"</span><span class="p">,</span> <span class="s">"api_key"</span><span class="p">)</span>
+    <span class="ow">or</span> <span class="n">dotenv_values</span><span class="p">(</span><span class="s">".env"</span><span class="p">).</span><span class="n">get</span><span class="p">(</span><span class="s">"ANTHROPIC_API_KEY"</span><span class="p">)</span>
+<span class="p">)</span>
+</code></pre></div></div>
+
+<p><strong>ここでクラッシュさせるか後回しか</strong>は設計判断。起動時に検証すると確実だが、軽量なping的呼び出し（models一覧取得など）が必要になるため起動が若干遅くなる。</p>
+
+<hr />
+
+<h2 id="-メモリ層の復元">④ メモリ層の復元</h2>
+
+<p>前回のメモリ設計記事で扱った話の実装フェーズだ。</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># External Memory
+</span><span class="bp">self</span><span class="p">.</span><span class="n">user_memory</span>    <span class="o">=</span> <span class="n">load_file</span><span class="p">(</span><span class="s">"~/.agentcli/memory.md"</span><span class="p">)</span>
+<span class="bp">self</span><span class="p">.</span><span class="n">project_memory</span> <span class="o">=</span> <span class="n">load_file</span><span class="p">(</span><span class="s">"./AGENT.md"</span><span class="p">)</span>  <span class="c1"># CLAUDE.md相当
+</span>
+<span class="c1"># Session履歴の復元（--resumeオプション等）
+</span><span class="k">if</span> <span class="n">args</span><span class="p">.</span><span class="n">resume</span><span class="p">:</span>
+    <span class="bp">self</span><span class="p">.</span><span class="n">history</span> <span class="o">=</span> <span class="n">load_session</span><span class="p">(</span><span class="n">args</span><span class="p">.</span><span class="n">session_id</span><span class="p">)</span>
+<span class="k">else</span><span class="p">:</span>
+    <span class="bp">self</span><span class="p">.</span><span class="n">history</span> <span class="o">=</span> <span class="p">[]</span>
+
+<span class="c1"># Vector DB接続（Episodic Memoryがあれば）
+</span><span class="bp">self</span><span class="p">.</span><span class="n">vector_db</span> <span class="o">=</span> <span class="n">ChromaDB</span><span class="p">(</span><span class="n">persist_dir</span><span class="o">=</span><span class="s">"~/.agentcli/vectors"</span><span class="p">)</span>
+</code></pre></div></div>
+
+<hr />
+
+<h2 id="-mcp--ツール接続">⑤ MCP / ツール接続</h2>
+
+<p>ここが今回の主題。MCPプロトコルでは<strong>起動時の動作が明確に定義されている</strong>。</p>
+
+<h3 id="mcpのハンドシェイク標準シーケンス">MCPのハンドシェイク標準シーケンス</h3>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>1. 接続確立（stdio起動 or HTTP接続）
+    ↓
+2. initialize（プロトコルネゴシエーション）
+    ↓
+3. initialized 通知
+    ↓
+4. capability に応じてリソース取得
+   ├─ tools/list      （Tools対応なら）
+   ├─ resources/list  （Resources対応なら）
+   └─ prompts/list    （Prompts対応なら）
+    ↓
+5. （オプション）通知購読
+</code></pre></div></div>
+
+<h3 id="ステップ1接続確立">ステップ1：接続確立</h3>
+
+<p>通信方式に応じてプロセスを起動またはHTTP接続する。</p>
+
+<ul>
+  <li><strong>stdio</strong>：MCP Serverをサブプロセスとして起動、標準入出力で通信</li>
+  <li><strong>SSE/HTTP</strong>：リモートサーバーにHTTP接続</li>
+</ul>
+
+<h3 id="ステップ2initialize必須最重要">ステップ2：initialize（必須・最重要）</h3>
+
+<p>クライアントとサーバーがお互いに<strong>自己紹介＋能力交換</strong>するフェーズ。</p>
+
+<p><strong>Client → Server</strong>:</p>
+
+<div class="language-json highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">{</span><span class="w">
+  </span><span class="nl">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"initialize"</span><span class="p">,</span><span class="w">
+  </span><span class="nl">"params"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+    </span><span class="nl">"protocolVersion"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2024-11-05"</span><span class="p">,</span><span class="w">
+    </span><span class="nl">"capabilities"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+      </span><span class="nl">"sampling"</span><span class="p">:</span><span class="w"> </span><span class="p">{},</span><span class="w">
+      </span><span class="nl">"roots"</span><span class="p">:</span><span class="w"> </span><span class="p">{}</span><span class="w">
+    </span><span class="p">},</span><span class="w">
+    </span><span class="nl">"clientInfo"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+      </span><span class="nl">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"agent-ai-cli"</span><span class="p">,</span><span class="w">
+      </span><span class="nl">"version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"0.4.0"</span><span class="w">
+    </span><span class="p">}</span><span class="w">
+  </span><span class="p">}</span><span class="w">
+</span><span class="p">}</span><span class="w">
+</span></code></pre></div></div>
+
+<p><strong>Server → Client</strong>:</p>
+
+<div class="language-json highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">{</span><span class="w">
+  </span><span class="nl">"result"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+    </span><span class="nl">"protocolVersion"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2024-11-05"</span><span class="p">,</span><span class="w">
+    </span><span class="nl">"capabilities"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+      </span><span class="nl">"tools"</span><span class="p">:</span><span class="w">     </span><span class="p">{</span><span class="nl">"listChanged"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">},</span><span class="w">
+      </span><span class="nl">"resources"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nl">"subscribe"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">},</span><span class="w">
+      </span><span class="nl">"prompts"</span><span class="p">:</span><span class="w">   </span><span class="p">{},</span><span class="w">
+      </span><span class="nl">"logging"</span><span class="p">:</span><span class="w">   </span><span class="p">{}</span><span class="w">
+    </span><span class="p">},</span><span class="w">
+    </span><span class="nl">"serverInfo"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w">
+      </span><span class="nl">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"github-mcp-server"</span><span class="p">,</span><span class="w">
+      </span><span class="nl">"version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"1.2.0"</span><span class="w">
+    </span><span class="p">}</span><span class="w">
+  </span><span class="p">}</span><span class="w">
+</span><span class="p">}</span><span class="w">
+</span></code></pre></div></div>
+
+<p>ここで決まること：</p>
+
+<ul>
+  <li><strong>使うプロトコルバージョン</strong>（互換性チェック）</li>
+  <li><strong>サーバーが提供できる機能</strong>（tools/resources/prompts/logging）</li>
+  <li><strong>クライアントが提供できる機能</strong>（sampling/roots）</li>
+</ul>
+
+<h3 id="ステップ3initialized-通知">ステップ3：initialized 通知</h3>
+
+<p>Client → Server に「準備OK」を通知（レスポンス不要）：</p>
+
+<div class="language-json highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">{</span><span class="w"> </span><span class="nl">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"notifications/initialized"</span><span class="w"> </span><span class="p">}</span><span class="w">
+</span></code></pre></div></div>
+
+<p>これで<strong>プロトコルレベルのハンドシェイクは完了</strong>。ここまでは何のツールも呼べない。</p>
+
+<h3 id="ステップ4capabilityに応じた取得">ステップ4：capabilityに応じた取得</h3>
+
+<p>initializeで返ってきた <code class="language-plaintext highlighter-rouge">capabilities</code> を見て<strong>選択的に</strong>取得する：</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">if</span> <span class="n">server_caps</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="s">"tools"</span><span class="p">):</span>
+    <span class="n">tools</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="p">.</span><span class="n">list_tools</span><span class="p">()</span>
+<span class="k">if</span> <span class="n">server_caps</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="s">"resources"</span><span class="p">):</span>
+    <span class="n">resources</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="p">.</span><span class="n">list_resources</span><span class="p">()</span>
+<span class="k">if</span> <span class="n">server_caps</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="s">"prompts"</span><span class="p">):</span>
+    <span class="n">prompts</span> <span class="o">=</span> <span class="k">await</span> <span class="n">client</span><span class="p">.</span><span class="n">list_prompts</span><span class="p">()</span>
+</code></pre></div></div>
+
+<p>ここで取得したツール定義は<strong>セッション中ずっと使い回す</strong>。LLM呼び出しのたびに <code class="language-plaintext highlighter-rouge">tools/list</code> を叩くわけではない。</p>
+
+<h3 id="ステップ5通知購読オプション">ステップ5：通知購読（オプション）</h3>
+
+<p><code class="language-plaintext highlighter-rouge">listChanged: true</code> のサーバーは「ツール一覧が変わった」を通知できる：</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Server → Client: notifications/tools/list_changed
+    ↓
+Client → Server: tools/list を再実行
+</code></pre></div></div>
+
+<p>これにより<strong>動的にツールが追加・削除されるケース</strong>にも対応できる。</p>
+
+<h3 id="なぜハンドシェイクが必要か">なぜハンドシェイクが必要か</h3>
+
+<p>「いきなり <code class="language-plaintext highlighter-rouge">tools/list</code> を叩けばいいのでは？」と思うかもしれない。理由は3つ：</p>
+
+<ol>
+  <li><strong>バージョン互換性</strong>：プロトコルが進化するため、双方が話せるバージョンを決める必要がある</li>
+  <li><strong>能力の事前共有</strong>：Server側に <code class="language-plaintext highlighter-rouge">sampling</code> を使われたくない場合、Client capabilityで宣言する必要がある</li>
+  <li><strong>状態管理</strong>：MCPはセッション型プロトコルなので「ここから本番」という明示が必要</li>
+</ol>
+
+<h3 id="複数サーバーは並列接続">複数サーバーは並列接続</h3>
+
+<p>複数のMCP Serverに繋ぐ場合、<strong>並列</strong>にしないと起動が遅くなる：</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">mcp_servers</span> <span class="o">=</span> <span class="n">config</span><span class="p">.</span><span class="n">mcp_servers</span>
+<span class="bp">self</span><span class="p">.</span><span class="n">mcp_clients</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncio</span><span class="p">.</span><span class="n">gather</span><span class="p">(</span><span class="o">*</span><span class="p">[</span>
+    <span class="n">connect_and_initialize</span><span class="p">(</span><span class="n">server</span><span class="p">)</span> <span class="k">for</span> <span class="n">server</span> <span class="ow">in</span> <span class="n">mcp_servers</span>
+<span class="p">])</span>
+<span class="bp">self</span><span class="p">.</span><span class="n">all_tools</span> <span class="o">=</span> <span class="n">flatten</span><span class="p">([</span><span class="n">c</span><span class="p">.</span><span class="n">tools</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="bp">self</span><span class="p">.</span><span class="n">mcp_clients</span><span class="p">])</span>
+</code></pre></div></div>
+
+<p>Serverが5個あったら、直列だと5倍遅くなる。</p>
+
+<hr />
+
+<h2 id="-システムプロンプト構築">⑥ システムプロンプト構築</h2>
+
+<p>ここまでで集めた情報を<strong>1つのSystem Promptに組み立てる</strong>。これがLLM呼び出しのたびに使われる土台になる。</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">system_prompt</span> <span class="o">=</span> <span class="sa">f</span><span class="s">"""
+You are an AI assistant.
+
+# Current Context
+- Date: </span><span class="si">{</span><span class="n">datetime</span><span class="p">.</span><span class="n">now</span><span class="p">()</span><span class="si">}</span><span class="s">
+- Working directory: </span><span class="si">{</span><span class="n">os</span><span class="p">.</span><span class="n">getcwd</span><span class="p">()</span><span class="si">}</span><span class="s">
+- OS: </span><span class="si">{</span><span class="n">platform</span><span class="p">.</span><span class="n">system</span><span class="p">()</span><span class="si">}</span><span class="s">
+
+# User Memory
+</span><span class="si">{</span><span class="bp">self</span><span class="p">.</span><span class="n">user_memory</span><span class="si">}</span><span class="s">
+
+# Project Memory
+</span><span class="si">{</span><span class="bp">self</span><span class="p">.</span><span class="n">project_memory</span><span class="si">}</span><span class="s">
+
+# Available Tools
+</span><span class="si">{</span><span class="n">format_tools_for_llm</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">all_tools</span><span class="p">)</span><span class="si">}</span><span class="s">
+"""</span>
+</code></pre></div></div>
+
+<hr />
+
+<h2 id="-ユーザー入力待ち">⑦ ユーザー入力待ち</h2>
+
+<p>REPLループに入る：</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
+    <span class="n">user_input</span> <span class="o">=</span> <span class="k">await</span> <span class="n">prompt_user</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">user_input</span> <span class="o">==</span> <span class="s">"/exit"</span><span class="p">:</span>
+        <span class="k">break</span>
+    <span class="k">await</span> <span class="bp">self</span><span class="p">.</span><span class="n">chat</span><span class="p">(</span><span class="n">user_input</span><span class="p">)</span>
+</code></pre></div></div>
+
+<hr />
+
+<h2 id="オプショナルな起動時タスク">オプショナルな起動時タスク</h2>
+
+<p>実装によってはこれらも追加される。</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>タスク</th>
+      <th>目的</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>ヘルスチェック</td>
+      <td>LLM API疎通、MCP Server応答確認</td>
+    </tr>
+    <tr>
+      <td>アップデート確認</td>
+      <td>新バージョン通知</td>
+    </tr>
+    <tr>
+      <td>Telemetry初期化</td>
+      <td>匿名利用統計（opt-in）</td>
+    </tr>
+    <tr>
+      <td>Workspace検出</td>
+      <td>git rootの判定、<code class="language-plaintext highlighter-rouge">.gitignore</code>読み込み</td>
+    </tr>
+    <tr>
+      <td>権限プロンプト</td>
+      <td>macOSのファイルアクセス権限等</td>
+    </tr>
+    <tr>
+      <td>キャッシュ初期化</td>
+      <td>LLMレスポンスキャッシュ、Embedding cache</td>
+    </tr>
+  </tbody>
+</table>
+
+<hr />
+
+<h2 id="起動時ログの例claude-code風">起動時ログの例（Claude Code風）</h2>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[09:00:00] Loading config from ./CLAUDE.md and ~/.claude/config.json
+[09:00:00] Logger initialized (level=INFO)
+[09:00:01] Authenticated with Anthropic API (model=claude-opus-4-7)
+[09:00:01] Loaded memory: user (1.2KB), project (3.4KB)
+[09:00:01] Connecting to 3 MCP servers...
+[09:00:02]   ✓ github-mcp (12 tools)
+[09:00:02]   ✓ filesystem-mcp (8 tools)
+[09:00:02]   ✗ slack-mcp (timeout)
+[09:00:02] System prompt built (4520 tokens)
+[09:00:02] Ready.
+&gt;
+</code></pre></div></div>
+
+<p>進捗表示が重要だ。サイレントだと「固まったのか接続中なのか」が分からない。</p>
+
+<hr />
+
+<h2 id="agent-ai-cli-への落とし込み">agent-ai-cli への落とし込み</h2>
+
+<p>現在のフェーズ（REPL + 永続化 + LangGraph ReAct完了）を踏まえた起動シーケンス案：</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">class</span> <span class="nc">AgentCLI</span><span class="p">:</span>
+    <span class="k">async</span> <span class="k">def</span> <span class="nf">startup</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="c1"># ① 設定
+</span>        <span class="bp">self</span><span class="p">.</span><span class="n">config</span> <span class="o">=</span> <span class="n">load_config</span><span class="p">(</span><span class="n">args</span><span class="p">)</span>
+
+        <span class="c1"># ② ログ
+</span>        <span class="n">setup_logging</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">config</span><span class="p">.</span><span class="n">log_level</span><span class="p">)</span>
+
+        <span class="c1"># ③ 認証
+</span>        <span class="n">validate_api_keys</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">config</span><span class="p">)</span>
+
+        <span class="c1"># ④ メモリ（Phase 4実装予定）
+</span>        <span class="bp">self</span><span class="p">.</span><span class="n">memory</span> <span class="o">=</span> <span class="n">MemoryStore</span><span class="p">.</span><span class="n">load</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">config</span><span class="p">.</span><span class="n">memory_dir</span><span class="p">)</span>
+
+        <span class="c1"># ⑤ MCP（将来実装）
+</span>        <span class="c1"># self.mcp_clients = await asyncio.gather(*[
+</span>        <span class="c1">#     connect_and_initialize(s) for s in self.config.mcp_servers
+</span>        <span class="c1"># ])
+</span>
+        <span class="c1"># ⑥ Graph構築（既存）
+</span>        <span class="bp">self</span><span class="p">.</span><span class="n">graph</span> <span class="o">=</span> <span class="n">build_react_graph</span><span class="p">(</span>
+            <span class="n">llm</span><span class="o">=</span><span class="bp">self</span><span class="p">.</span><span class="n">llm</span><span class="p">,</span>
+            <span class="n">tools</span><span class="o">=</span><span class="bp">self</span><span class="p">.</span><span class="n">tools</span><span class="p">,</span>
+            <span class="n">system_prompt</span><span class="o">=</span><span class="bp">self</span><span class="p">.</span><span class="n">build_system_prompt</span><span class="p">()</span>
+        <span class="p">)</span>
+
+        <span class="c1"># ⑦ REPL（既存）
+</span>        <span class="k">await</span> <span class="bp">self</span><span class="p">.</span><span class="n">repl_loop</span><span class="p">()</span>
+</code></pre></div></div>
+
+<hr />
+
+<h2 id="まとめ">まとめ</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>ステップ</th>
+      <th>一般的な内容</th>
+      <th>エラー時の影響</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1. 設定</td>
+      <td>CLI/env/file の優先順位マージ</td>
+      <td>起動不可</td>
+    </tr>
+    <tr>
+      <td>2. ログ</td>
+      <td>早期セットアップ</td>
+      <td>以降のデバッグ不可</td>
+    </tr>
+    <tr>
+      <td>3. 認証</td>
+      <td>LLM API Keyの確認</td>
+      <td>LLM呼び出し不可</td>
+    </tr>
+    <tr>
+      <td>4. メモリ復元</td>
+      <td>External/Session Memory読み込み</td>
+      <td>コンテキスト欠落</td>
+    </tr>
+    <tr>
+      <td>5. ツール接続</td>
+      <td>MCP initialize → tools/list</td>
+      <td>ツール呼び出し不可</td>
+    </tr>
+    <tr>
+      <td>6. プロンプト構築</td>
+      <td>全コンテキストの統合</td>
+      <td>不完全な振る舞い</td>
+    </tr>
+    <tr>
+      <td>7. 入力受付</td>
+      <td>REPLループ開始</td>
+      <td>—</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>ポイントは<strong>「壊れやすいもの・遅いもの」を早めにエラーで止める</strong>ことと、<strong>MCP接続のような重い処理は並列化＋進捗表示</strong>で体感を改善することだ。</p>
+
+<p>「Ready.」の一行は、これだけの準備の上に成り立っている。</p>
+
+
+  <!-- POST NAVIGATION -->
+  <footer class="postNav clearfix"><a class="prev" href="/blog/blog/ai-agent-memory-advanced/"><span>&laquo;&nbsp;AI Agentのメモリ設計 深掘り編：依存関係・挿入戦略・更新コスト</span></a></footer>
+</article>
+      </div>
+   </div><!-- end .content --><div class="footer">
+	<div class="container">
+		<p class="copy">
+			&copy; 2026
+			<a href="http://brianmaierjr.com">Brian Maier Jr.</a> Powered by
+			<a href="http://jekyllrb.com">Jekyll</a>
+		</p>
+
+		<div class="footer-links">
+			<ul class="noList"><li>
+	<a href="https://www.linkedin.com/in/in/%E6%9C%8B-%E5%BC%B5-a77984179" target="_blank">
+	<svg
+		id="linkedin"
+		xmlns="http://www.w3.org/2000/svg"
+		width="96"
+		height="96"
+		viewBox="0 0 96 96"
+	>
+		<g fill="none">
+			<circle
+				class="outer-shape"
+				cx="48"
+				cy="48"
+				r="48"
+				fill="#000"
+			/>
+			<path
+				class="inner-shape"
+				fill="#FFF"
+				d="M10.2966071,46 L0.759821429,46 L0.759821429,15.2881537 L10.2966071,15.2881537 L10.2966071,46 Z M5.52308036,11.0987745 C2.47352679,11.0987745 1.17239551e-12,8.57282522 1.17239551e-12,5.52320357 C1.17239551e-12,2.47282245 2.47276734,-9.65449942e-13 5.52308036,-9.65449942e-13 C8.57339338,-9.65449942e-13 11.0461607,2.47282245 11.0461607,5.52320357 C11.0461607,8.57282522 8.57160714,11.0987745 5.52308036,11.0987745 Z M45.9897321,46 L36.4734821,46 L36.4734821,31.0496663 C36.4734821,27.4866403 36.4016071,22.9173419 31.5151339,22.9173419 C26.5567857,22.9173419 25.7969643,26.7884104 25.7969643,30.7929641 L25.7969643,46 L16.2704464,46 L16.2704464,15.2881537 L25.4170536,15.2881537 L25.4170536,19.4775329 L25.5505357,19.4775329 C26.82375,17.0645326 29.9338839,14.5180472 34.5739286,14.5180472 C44.2257143,14.5180472 46,20.8739927 46,29.1295341 L46,46 L45.9897321,46 Z"
+				transform="translate(25 25)"
+			/>
+		</g>
+	</svg>
+</a>
+</li>
+<li>
+	<a href="https://github.com/avocado-planet" target="_blank">
+		<svg
+			id="github"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path
+				class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.5)"
+				d="M50,1C22.938,1,1,22.938,1,50s21.938,49,49,49s49-21.938,49-49S77.062,1,50,1z M79.099,79.099 c-3.782,3.782-8.184,6.75-13.083,8.823c-1.245,0.526-2.509,0.989-3.79,1.387v-7.344c0-3.86-1.324-6.699-3.972-8.517 c1.659-0.16,3.182-0.383,4.57-0.67c1.388-0.287,2.855-0.702,4.402-1.245c1.547-0.543,2.935-1.189,4.163-1.938 c1.228-0.75,2.409-1.723,3.541-2.919s2.082-2.552,2.847-4.067s1.372-3.334,1.818-5.455c0.446-2.121,0.67-4.458,0.67-7.01 c0-4.945-1.611-9.155-4.833-12.633c1.467-3.828,1.308-7.991-0.478-12.489l-1.197-0.143c-0.829-0.096-2.321,0.255-4.474,1.053 c-2.153,0.798-4.57,2.105-7.249,3.924c-3.797-1.053-7.736-1.579-11.82-1.579c-4.115,0-8.039,0.526-11.772,1.579 c-1.69-1.149-3.294-2.097-4.809-2.847c-1.515-0.75-2.727-1.26-3.637-1.532c-0.909-0.271-1.754-0.439-2.536-0.503 c-0.782-0.064-1.284-0.079-1.507-0.048c-0.223,0.031-0.383,0.064-0.478,0.096c-1.787,4.53-1.946,8.694-0.478,12.489 c-3.222,3.477-4.833,7.688-4.833,12.633c0,2.552,0.223,4.889,0.67,7.01c0.447,2.121,1.053,3.94,1.818,5.455 c0.765,1.515,1.715,2.871,2.847,4.067s2.313,2.169,3.541,2.919c1.228,0.751,2.616,1.396,4.163,1.938 c1.547,0.543,3.014,0.957,4.402,1.245c1.388,0.287,2.911,0.511,4.57,0.67c-2.616,1.787-3.924,4.626-3.924,8.517v7.487 c-1.445-0.43-2.869-0.938-4.268-1.53c-4.899-2.073-9.301-5.041-13.083-8.823c-3.782-3.782-6.75-8.184-8.823-13.083 C9.934,60.948,8.847,55.56,8.847,50s1.087-10.948,3.231-16.016c2.073-4.899,5.041-9.301,8.823-13.083s8.184-6.75,13.083-8.823 C39.052,9.934,44.44,8.847,50,8.847s10.948,1.087,16.016,3.231c4.9,2.073,9.301,5.041,13.083,8.823 c3.782,3.782,6.75,8.184,8.823,13.083c2.143,5.069,3.23,10.457,3.23,16.016s-1.087,10.948-3.231,16.016 C85.848,70.915,82.88,75.317,79.099,79.099L79.099,79.099z"
+			></path>
+		</svg>
+	</a>
+</li>
+</ul>
+		</div>
+	</div>
+</div>
+<!-- end .footer -->
+<!-- Add jQuery and other scripts -->
+<script src="//ajax.googleapis.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
+<script>window.jQuery || document.write('<script src=/blog/assets/js/jquery-1.11.2.min.js><\/script>')</script>
+<script src="/blog/assets/js/dropcap.min.js"></script>
+<script src="/blog/assets/js/responsive-nav.min.js"></script>
+<script src="/blog/assets/js/scripts.js"></script>
+</body>
+
+</html>
