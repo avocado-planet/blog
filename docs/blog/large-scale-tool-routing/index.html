@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<!--[if lt IE 7]><html class="no-js lt-ie9 lt-ie8 lt-ie7"><![endif]-->
+<!--[if IE 7]><html class="no-js lt-ie9 lt-ie8" <![endif]-->
+<!--[if IE 8]><html class="no-js lt-ie9" <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js"> <!--<![endif]--><head>
+	<meta charset="utf-8" />
+	<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<meta name="description" content="" />
+	<title>Agent AI CLIで数百のツール/スキルを効率よくルーティングする — retrieve-then-load 実践ガイド</title>
+
+	<!-- Open Graph Meta -->
+	<meta content="Avocado Planet" property="og:site_name" /><meta content="Agent AI CLIで数百のツール/スキルを効率よくルーティングする — retrieve-then-load 実践ガイド" property="og:title" /><meta content="article" property="og:type" /><meta content="ツールやスキルが数百規模になったAIエージェントで、コンテキストを溢れさせずに正しいツールへルーティングするための設計パターンと実装の勘所をまとめる。" property="og:description" /><meta content="https://avocado-planet.github.io/blog/blog/large-scale-tool-routing/" property="og:url" /><meta
+		content="2026-07-04T00:00:00+00:00"
+		property="article:published_time"
+	/>
+	<meta content="https://avocado-planet.github.io/blog/about/" property="article:author" /><meta
+		content="https://avocado-planet.github.io/blog/assets/img/touring.jpg"
+		property="og:image"
+	/><!-- Twitter Cards -->
+	<meta name="twitter:card" content="summary" />
+	<meta name="twitter:site" content="@" />
+	<meta name="twitter:creator" content="@" /><meta name="twitter:title" content="Agent AI CLIで数百のツール/スキルを効率よくルーティングする — retrieve-then-load 実践ガイド" /><meta name="twitter:url" content="https://avocado-planet.github.io/blog/blog/large-scale-tool-routing/" /><meta name="twitter:description" content="ツールやスキルが数百規模になったAIエージェントで、コンテキストを溢れさせずに正しいツールへルーティングするための設計パターンと実装の勘所をまとめる。" /><meta
+		name="twitter:image:src"
+		content="https://avocado-planet.github.io/blog/assets/img/touring.jpg"
+	/><!-- Favicon -->
+	<link rel="icon" type="image/x-icon" href=""/>
+
+	<!-- Come and get me RSS readers -->
+	<link rel="alternate" type="application/rss+xml" title="Avocado Planet"
+	href="https://avocado-planet.github.io/blog/feed.xml" />
+
+	<!-- Stylesheet -->
+	<link rel="stylesheet" href="/blog/assets/css/style.css" />
+
+	<!-- Canonical URL -->
+	<link
+		rel="canonical"
+		href="https://avocado-planet.github.io/blog/blog/large-scale-tool-routing/"
+	/></head>
+<body> <div class="header ">
+     <div class="container">
+         <h1 class="logo"><a href="/blog/">Avocado Planet</a></h1>
+         <nav class="nav-collapse">
+             <ul class="noList"><li class="elementfirst">
+                     <a href="/blog/index.html">Home</a>
+                 </li><li class="elementlast">
+                     <a href="/blog/about">About</a>
+                 </li><li> <a href="https://github.com/avocado-planet/" target="_blank">GitHub</a></li>
+             </ul>
+         </nav>
+     </div>
+ </div><!-- end .header -->
+<div class="content">
+      <div class="container">
+         <article class="post"><header>
+    <h1 class="postTitle">Agent AI CLIで数百のツール/スキルを効率よくルーティングする — retrieve-then-load 実践ガイド</h1>
+    <p class="meta">July 04, 2026 | <span class="time">1</span> Minute Read</p>
+  </header>
+
+  <p>AIエージェントにツールを追加していくと、いつか必ず「全部をコンテキストに載せきれない」壁にぶつかる。MCPサーバーを数個つないだだけでも、作業を始める前に数万トークンがツール定義で消える。本記事では、ツール/スキルが数百規模になったときに効率よくルーティングするための設計と、LangGraph ReActベースの自作CLIへの落とし込みを整理する。</p>
+
+<h2 id="核心は検索してから読み込む">核心は「検索してから読み込む」</h2>
+
+<p>答えは一つに集約される。<strong>全ツール定義を事前にコンテキストへ載せない</strong>。代わりに、クエリに応じて関連ツールを検索し、上位数個だけを読み込む「retrieve-then-load」の2段構えにする。</p>
+
+<p>Anthropicもこれを Tool Search Tool として製品化しており、<code class="language-plaintext highlighter-rouge">defer_loading: true</code> でマークしたツールは事前ロードせず、必要時に動的ディスカバリする仕組みになっている。2026年1月14日からは Claude Code の MCP にもデフォルト適用されている。</p>
+
+<p><img src="/blog/assets/img/large-scale-tool-routing-architecture.svg" alt="retrieve-then-load アーキテクチャ" /></p>
+
+<p>図の色分けは、灰=データ源、青=検索パイプライン、橙=コンテキスト/実行、紫=バイパス（常時ロード）を表す。数百のツール定義をインデックス化しておき、クエリが来たら Retriever が上位3〜5個を取得、それだけを LLM のコンテキストに注入して ReAct ループを回す。頻出ツールは検索を経由せず常時ロードしておく。</p>
+
+<h2 id="規模別の戦略">規模別の戦略</h2>
+
+<p>ツール数によって取るべき手は変わる。</p>
+
+<p><strong>〜50個</strong> — 全ロードでよい。検索層は不要で、起動時に <code class="language-plaintext highlighter-rouge">bind_tools</code> で全部渡すだけ。</p>
+
+<p><strong>50〜数百</strong> — retrieve-then-load が最も効くレンジ。従来は50以上のMCPツールで作業前に約77Kトークンを消費するところ、Tool Search で約8.7Kに削減され、コンテキストの95%を温存できる（85%削減）。Anthropicの内部評価では、大規模ツールライブラリで Opus 4 が49%→74%、Opus 4.5 が79.5%→88.1%に精度改善したと報告されている。</p>
+
+<p><strong>数百〜数千</strong> — 単一の検索だけでは精度が落ちるので、以下を重ねる。</p>
+
+<ul>
+  <li><strong>階層化（カテゴリ / namespace）</strong>: まずカテゴリ（ドメインやMCPサーバー単位）に絞り、その中でツールを検索する。検索空間を段階的に縮小できる。</li>
+  <li><strong>マルチエージェント（Supervisor）</strong>: サブエージェントごとに専門ツールセット（各20〜30個）を持たせ、Supervisor がルーティングする。ただし各サブエージェント自体は128ツール上限に縛られるため、検索層との併用が前提になる。</li>
+  <li><strong>Code Execution（コードモード）</strong>: ツールをファイルシステム上のコードモジュールとして提示し、モデルが必要なものだけ <code class="language-plaintext highlighter-rouge">import</code> して呼ぶ。定義をオンデマンドで読み、中間結果をコード側でフィルタしてからモデルに渡せる。ツール連鎖が多い場合に、中間結果のトークン往復を消せるのが強み。</li>
+</ul>
+
+<h2 id="検索エンジンの選択">検索エンジンの選択</h2>
+
+<p>Retriever の中身は、要件に応じて選ぶ。</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>方式</th>
+      <th>特徴</th>
+      <th>向く場面</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>BM25 / regex</td>
+      <td>インデックス不要・軽量。説明文の質に依存</td>
+      <td>自作の最初の一手。Anthropicも <code class="language-plaintext highlighter-rouge">tool_search_tool_bm25</code> / <code class="language-plaintext highlighter-rouge">_regex</code> を提供</td>
+    </tr>
+    <tr>
+      <td>Dense（embedding）</td>
+      <td>言い換え・意図に強い</td>
+      <td>クエリ表現がツール名と乖離するケース</td>
+    </tr>
+    <tr>
+      <td>Hybrid（BM25 + dense, RRF）</td>
+      <td>最も堅い</td>
+      <td>本番運用</td>
+    </tr>
+    <tr>
+      <td>Graph RAG-Tool Fusion</td>
+      <td>ツール間の依存（あるツールの出力が別ツールの引数）を扱う</td>
+      <td>連鎖前提のワークフロー</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>まず BM25 で計測し、不足分だけ Dense / Hybrid に上げる、という段階的な進め方が現実的だ。</p>
+
+<h2 id="langgraph-react-への実装">LangGraph ReAct への実装</h2>
+
+<p>自作CLIに組み込むなら、手順はこうなる。</p>
+
+<ol>
+  <li><strong>ツールレジストリとインデックスを分離管理する。</strong> 起動時にツール説明文を BM25 かベクトルでインデックス化しておく。</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">search_tools</code> メタツールをループに追加する。</strong> エージェントがこれを呼ぶと、ヒットしたツール定義だけを次ターンの <code class="language-plaintext highlighter-rouge">bind_tools</code> に動的注入する。つまりモデルノードに渡すツールリストをターンごとに差し替える。</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">langgraph-bigtool</code> を先に試す。</strong> ツールレジストリへのセマンティック検索から動的バインドまで、まさにこのパターンを提供しているので、自作する前に挙動を確認する価値がある。</li>
+  <li><strong>Anthropic純正で済ませる場合</strong>は <code class="language-plaintext highlighter-rouge">defer_loading: true</code> と <code class="language-plaintext highlighter-rouge">tool_search_tool_bm25_20251119</code>（betaヘッダ <code class="language-plaintext highlighter-rouge">advanced-tool-use-2025-11-20</code>）を使う。最大10,000ツールまで対応し、1検索につき3〜5個の関連ツールを返す。Sonnet 4.5/4.6・Opus 4.5/4.6対応で、Haikuは非対応。</li>
+</ol>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># イメージ: search_tools がヒットしたツールだけを次ターンにバインドする
+</span><span class="k">def</span> <span class="nf">agent_node</span><span class="p">(</span><span class="n">state</span><span class="p">):</span>
+    <span class="n">query</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s">"messages"</span><span class="p">][</span><span class="o">-</span><span class="mi">1</span><span class="p">].</span><span class="n">content</span>
+    <span class="n">hits</span> <span class="o">=</span> <span class="n">registry</span><span class="p">.</span><span class="n">search</span><span class="p">(</span><span class="n">query</span><span class="p">,</span> <span class="n">k</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>          <span class="c1"># BM25 / vector
+</span>    <span class="n">tools</span> <span class="o">=</span> <span class="p">[</span><span class="n">registry</span><span class="p">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">)</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">hits</span><span class="p">]</span>
+    <span class="n">model</span> <span class="o">=</span> <span class="n">llm</span><span class="p">.</span><span class="n">bind_tools</span><span class="p">(</span><span class="n">always_loaded</span> <span class="o">+</span> <span class="n">tools</span><span class="p">)</span>  <span class="c1"># 頻出ツール + 検索結果
+</span>    <span class="k">return</span> <span class="p">{</span><span class="s">"messages"</span><span class="p">:</span> <span class="p">[</span><span class="n">model</span><span class="p">.</span><span class="n">invoke</span><span class="p">(</span><span class="n">state</span><span class="p">[</span><span class="s">"messages"</span><span class="p">])]}</span>
+</code></pre></div></div>
+
+<h2 id="skills-も同じ問題">Skills も同じ問題</h2>
+
+<p>Skill はツールと別物に見えて、ルーティング問題としては同じだ。<code class="language-plaintext highlighter-rouge">SKILL.md</code> の <code class="language-plaintext highlighter-rouge">description</code> フィールドがクエリにマッチング判定される。つまり実質的に説明文検索である。数百のSkillでも、説明文をインデックス化して top-k を取得する同じ手法が効く。</p>
+
+<h2 id="落とし穴">落とし穴</h2>
+
+<p><strong>検索精度がボトルネックになる。</strong> Arcade.dev が4,027ツールで25の素直なワークフローを試したところ、regexで56%（25中14）、BM25でも64%（25中16）にとどまり、「send email」が Gmail_SendEmail を引けないといった、ありふれたツールの取りこぼしも起きている。対策は次の3点。</p>
+
+<ul>
+  <li><strong>説明文をキーワード豊富に、自然言語で書く。</strong> Tool Search はツール名・説明・パラメータ名にマッチするため、具体的でキーワードの多い説明ほど発見されやすい。技術ジャーゴンより、利用者の言い回し（「会話レポートを送る」など）を入れる。</li>
+  <li><strong>頻出ツールは常時ロードする（<code class="language-plaintext highlighter-rouge">defer_loading: false</code>）。</strong> 毎セッションで使うツールは事前ロードが推奨されている。</li>
+  <li><strong>BM25で計測してから段階的に上げる。</strong> いきなりHybridを組むより、まず素朴なBM25でどこまで引けるかを測り、失敗パターンを見てからDense/Hybrid化する。</li>
+</ul>
+
+<h2 id="まとめ">まとめ</h2>
+
+<p>数百ツール規模のルーティングは、「全部載せない → 検索して上位数個だけ載せる」という一点に尽きる。50〜数百なら retrieve-then-load 単体で十分効き、数千規模では階層化・マルチエージェント・コードモードを重ねる。そして最終的な性能を決めるのは検索精度、すなわちツール説明文の品質だ。まず <code class="language-plaintext highlighter-rouge">langgraph-bigtool</code> を1本動かして BM25 で精度を測り、足りなければ Hybrid 化する——この順序で進めるのが堅実だと考えている。</p>
+
+
+  <!-- POST NAVIGATION -->
+  <footer class="postNav clearfix"><a class="prev" href="/blog/blog/ai-agent-startup-sequence/"><span>&laquo;&nbsp;AI Agent CLIの起動時に何が起きているか：MCPハンドシェイクから全体シーケンスまで</span></a></footer>
+</article>
+      </div>
+   </div><!-- end .content --><div class="footer">
+	<div class="container">
+		<p class="copy">
+			&copy; 2026
+			<a href="http://brianmaierjr.com">Brian Maier Jr.</a> Powered by
+			<a href="http://jekyllrb.com">Jekyll</a>
+		</p>
+
+		<div class="footer-links">
+			<ul class="noList"><li>
+	<a href="https://www.linkedin.com/in/in/%E6%9C%8B-%E5%BC%B5-a77984179" target="_blank">
+	<svg
+		id="linkedin"
+		xmlns="http://www.w3.org/2000/svg"
+		width="96"
+		height="96"
+		viewBox="0 0 96 96"
+	>
+		<g fill="none">
+			<circle
+				class="outer-shape"
+				cx="48"
+				cy="48"
+				r="48"
+				fill="#000"
+			/>
+			<path
+				class="inner-shape"
+				fill="#FFF"
+				d="M10.2966071,46 L0.759821429,46 L0.759821429,15.2881537 L10.2966071,15.2881537 L10.2966071,46 Z M5.52308036,11.0987745 C2.47352679,11.0987745 1.17239551e-12,8.57282522 1.17239551e-12,5.52320357 C1.17239551e-12,2.47282245 2.47276734,-9.65449942e-13 5.52308036,-9.65449942e-13 C8.57339338,-9.65449942e-13 11.0461607,2.47282245 11.0461607,5.52320357 C11.0461607,8.57282522 8.57160714,11.0987745 5.52308036,11.0987745 Z M45.9897321,46 L36.4734821,46 L36.4734821,31.0496663 C36.4734821,27.4866403 36.4016071,22.9173419 31.5151339,22.9173419 C26.5567857,22.9173419 25.7969643,26.7884104 25.7969643,30.7929641 L25.7969643,46 L16.2704464,46 L16.2704464,15.2881537 L25.4170536,15.2881537 L25.4170536,19.4775329 L25.5505357,19.4775329 C26.82375,17.0645326 29.9338839,14.5180472 34.5739286,14.5180472 C44.2257143,14.5180472 46,20.8739927 46,29.1295341 L46,46 L45.9897321,46 Z"
+				transform="translate(25 25)"
+			/>
+		</g>
+	</svg>
+</a>
+</li>
+<li>
+	<a href="https://github.com/avocado-planet" target="_blank">
+		<svg
+			id="github"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path
+				class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.5)"
+				d="M50,1C22.938,1,1,22.938,1,50s21.938,49,49,49s49-21.938,49-49S77.062,1,50,1z M79.099,79.099 c-3.782,3.782-8.184,6.75-13.083,8.823c-1.245,0.526-2.509,0.989-3.79,1.387v-7.344c0-3.86-1.324-6.699-3.972-8.517 c1.659-0.16,3.182-0.383,4.57-0.67c1.388-0.287,2.855-0.702,4.402-1.245c1.547-0.543,2.935-1.189,4.163-1.938 c1.228-0.75,2.409-1.723,3.541-2.919s2.082-2.552,2.847-4.067s1.372-3.334,1.818-5.455c0.446-2.121,0.67-4.458,0.67-7.01 c0-4.945-1.611-9.155-4.833-12.633c1.467-3.828,1.308-7.991-0.478-12.489l-1.197-0.143c-0.829-0.096-2.321,0.255-4.474,1.053 c-2.153,0.798-4.57,2.105-7.249,3.924c-3.797-1.053-7.736-1.579-11.82-1.579c-4.115,0-8.039,0.526-11.772,1.579 c-1.69-1.149-3.294-2.097-4.809-2.847c-1.515-0.75-2.727-1.26-3.637-1.532c-0.909-0.271-1.754-0.439-2.536-0.503 c-0.782-0.064-1.284-0.079-1.507-0.048c-0.223,0.031-0.383,0.064-0.478,0.096c-1.787,4.53-1.946,8.694-0.478,12.489 c-3.222,3.477-4.833,7.688-4.833,12.633c0,2.552,0.223,4.889,0.67,7.01c0.447,2.121,1.053,3.94,1.818,5.455 c0.765,1.515,1.715,2.871,2.847,4.067s2.313,2.169,3.541,2.919c1.228,0.751,2.616,1.396,4.163,1.938 c1.547,0.543,3.014,0.957,4.402,1.245c1.388,0.287,2.911,0.511,4.57,0.67c-2.616,1.787-3.924,4.626-3.924,8.517v7.487 c-1.445-0.43-2.869-0.938-4.268-1.53c-4.899-2.073-9.301-5.041-13.083-8.823c-3.782-3.782-6.75-8.184-8.823-13.083 C9.934,60.948,8.847,55.56,8.847,50s1.087-10.948,3.231-16.016c2.073-4.899,5.041-9.301,8.823-13.083s8.184-6.75,13.083-8.823 C39.052,9.934,44.44,8.847,50,8.847s10.948,1.087,16.016,3.231c4.9,2.073,9.301,5.041,13.083,8.823 c3.782,3.782,6.75,8.184,8.823,13.083c2.143,5.069,3.23,10.457,3.23,16.016s-1.087,10.948-3.231,16.016 C85.848,70.915,82.88,75.317,79.099,79.099L79.099,79.099z"
+			></path>
+		</svg>
+	</a>
+</li>
+</ul>
+		</div>
+	</div>
+</div>
+<!-- end .footer -->
+<!-- Add jQuery and other scripts -->
+<script src="//ajax.googleapis.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
+<script>window.jQuery || document.write('<script src=/blog/assets/js/jquery-1.11.2.min.js><\/script>')</script>
+<script src="/blog/assets/js/dropcap.min.js"></script>
+<script src="/blog/assets/js/responsive-nav.min.js"></script>
+<script src="/blog/assets/js/scripts.js"></script>
+</body>
+
+</html>
