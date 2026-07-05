@@ -5,9 +5,73 @@
     <description>Tech blog on AI, ServiceNow, and cloud engineering</description>
     <link>https://avocado-planet.github.io/</link>
     <atom:link href="https://avocado-planet.github.io/feed.xml" rel="self" type="application/rss+xml"/>
-    <pubDate>Sat, 04 Jul 2026 14:16:34 +0000</pubDate>
-    <lastBuildDate>Sat, 04 Jul 2026 14:16:34 +0000</lastBuildDate>
+    <pubDate>Sun, 05 Jul 2026 00:29:03 +0000</pubDate>
+    <lastBuildDate>Sun, 05 Jul 2026 00:29:03 +0000</lastBuildDate>
     <generator>Jekyll v3.10.0</generator><item>
+        <title>Claudeのプロンプト構造とキャッシュを理解する — 「静的を先、動的を後」がなぜ効くのか</title>
+        <description>&lt;p&gt;MCPサーバーを一つ足しただけで、作業を始める前にトークンがごっそり消える。長いセッションが途中から急に遅く・高くなる。こうした現象の裏側には、プロンプトの「並び方」とキャッシュの関係がある。本記事では、プロンプトがどう組み立てられ、キャッシュが何をどこに保存し、なぜ順番が効くのかを、順を追って分かりやすく説明する。&lt;/p&gt;
+
+&lt;h2 id=&quot;プロンプトはどう組み立てられるか&quot;&gt;プロンプトはどう組み立てられるか&lt;/h2&gt;
+
+&lt;p&gt;APIリクエストは tools → system → messages の順に一列に並ぶ。ツール定義が先頭、次にシステムプロンプト、最後に会話メッセージだ。&lt;/p&gt;
+
+&lt;p&gt;設計上の要点は「プロンプト組み立てをセッション状態の純粋関数にする」こと。同じ状態からは常にバイト単位で同一のプロンプトが出るようにし、タイムスタンプ・ランダムID・シリアライズ順序の揺れといった非決定的な要素を安定した先頭部分に混ぜない。これがキャッシュを安定して効かせる前提になる。&lt;/p&gt;
+
+&lt;p&gt;もう一つ興味深いのは、マルチエージェントの協調がコードではなくシステムプロンプトの指示として書かれていること。サブエージェントは特別なプロセスではなく、異なるシステムプロンプトを与えられたClaudeのインスタンスにすぎない。「プロンプト＝アーキテクチャ」という考え方だ。&lt;/p&gt;
+
+&lt;h2 id=&quot;プレフィックスとは&quot;&gt;プレフィックスとは&lt;/h2&gt;
+
+&lt;p&gt;キャッシュの話に入る前に、鍵となる「プレフィックス（prefix）」を押さえる。prefixは接頭辞、つまり&lt;strong&gt;先頭から始まる連続した一部分&lt;/strong&gt;のこと。&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ABCDEFG&lt;/code&gt; なら &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;A&lt;/code&gt;, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;AB&lt;/code&gt;, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ABC&lt;/code&gt; … はすべてprefixだが、途中の &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;BCD&lt;/code&gt; や末尾の &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;EFG&lt;/code&gt; はprefixではない。「先頭から切れ目なく続いていること」が条件だ。&lt;/p&gt;
+
+&lt;p&gt;リクエストにおけるプレフィックスは、先ほどの並び（tools → system → messages）の先頭からの連続部分を指す。キャッシュはこの「先頭からどこまでが前回と一致するか」だけを見る。&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/blog/assets/img/prompt-order-cache-hit.svg&quot; alt=&quot;リクエストの並びとキャッシュ命中範囲&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;先頭の安定した部分（ツール・システム・直近以外の履歴）が前回と同じなら、その範囲をまるごと再利用できる。逆に、途中の1か所が変わると、そこから後ろは変わっていなくても全部作り直しになる。&lt;/p&gt;
+
+&lt;p&gt;なぜ「途中が変わると後ろが全滅」なのか。モデルは文章を前から順に読み、各トークンの意味を「それまで読んだ全部」を踏まえて計算するからだ。3番目のトークンの状態は1・2番目に依存して決まる。だから途中の1文字が変われば、そこから先の計算結果は前回と別物になる。キャッシュが「先頭から連続で一致した範囲だけ」しか再利用できないのは、このためだ。&lt;/p&gt;
+
+&lt;h2 id=&quot;キャッシュは何をどこに保存するか&quot;&gt;キャッシュは何を・どこに保存するか&lt;/h2&gt;
+
+&lt;p&gt;保存されるのはプロンプトの生テキストや応答ではない。プレフィックスを処理したときにattention層が計算した &lt;strong&gt;KVキャッシュ（Key/Valueテンソル）&lt;/strong&gt; だ。&lt;/p&gt;
+
+&lt;p&gt;置き場所はAnthropicのサーバー側、具体的にはリクエストを処理したGPUのメモリ（VRAM）上。モデルごとに分離され、TTL（5分、または1時間）だけ生存する一時的なものだ。公式ドキュメントでも、KVキャッシュ表現とキャッシュ内容のハッシュはメモリ上にのみ保持され、ディスクに永続化されないと明記されている。つまり「会話を保存して使い回している」のではなく、「計算済みの中間状態を数分だけメモリに置いている」だけだ。&lt;/p&gt;
+
+&lt;h2 id=&quot;なぜ読み込みが安いのか&quot;&gt;なぜ読み込みが安いのか&lt;/h2&gt;
+
+&lt;p&gt;推論で最も重いのは &lt;strong&gt;Prefill&lt;/strong&gt; ——入力トークン全体にわたってattentionを計算する工程で、コストは文脈長にほぼ二次で増える。キャッシュが命中すると、このPrefillをまるごとスキップし、VRAMにある計算済みK/Vテンソルをそのままattention層へ流し込む。GPUの計算をやり直さずに済むので、読み込みは通常入力の10%（0.1×）で課金される。90%引きの正体は「再計算をしないこと」だ。&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/blog/assets/img/kv-cache-mechanism.svg&quot; alt=&quot;キャッシュの中身と、読み込みが安い理由&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;ただし厳密には無料ではない。内訳は、書き込み（初回）が1.25×（5分TTL）または2×（1時間TTL）、読み込みが0.1×。5分TTLなら1回命中すれば書き込みの割増を取り戻し、以降は純粋な節約になる。&lt;/p&gt;
+
+&lt;p&gt;唯一「無料」なのはTTLのリフレッシュだ。ヒットするたびに5分の生存期間が追加料金なしで延長される。すでにVRAMに載っているテンソルの生存を少し延ばすだけで、Anthropic側の追加計算がゼロだからだ。&lt;/p&gt;
+
+&lt;h2 id=&quot;静的を先動的を後の実践&quot;&gt;「静的を先、動的を後」の実践&lt;/h2&gt;
+
+&lt;p&gt;原則を実装に落とすと、次の4点になる。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;&lt;strong&gt;並び順を守る。&lt;/strong&gt; 変わらないもの（ツール定義、システム指示、静的な文脈）を先頭に、変わるもの（ユーザー入力）を末尾に置く。ブレークポイントは最後のsystemブロックに1つ置けば、toolsとsystemがまとめてキャッシュされる。&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;安定プレフィックスに変動要素を混ぜない。&lt;/strong&gt; よくある事故が、システムプロンプトに現在時刻を差し込むこと。タイムスタンプが1か所入るだけで、それ以降が全部キャッシュ対象外になる。日付が変わった等の理由でシステムプロンプトを書き換えず、更新情報は後ろのメッセージ側に足す。&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;決定性を守る。&lt;/strong&gt; JSONのキー順やツールスキーマの並びが毎回揺れるとバイト不一致を生む。ツールは名前でソートして常に同じ順に並べ、「同じ状態→同じバイト列」を徹底する。&lt;/li&gt;
+  &lt;li&gt;&lt;strong&gt;動的に増えるツールはメッセージ側へ。&lt;/strong&gt; 検索で発見したツールはsystemプレフィックスに差し込まず、会話履歴側に追加する。プレフィックスが無傷のまま保たれ、ツールを増やしてもキャッシュ命中を維持できる。&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h2 id=&quot;つまづきやすい点&quot;&gt;つまづきやすい点&lt;/h2&gt;
+
+&lt;p&gt;キャッシュはモデルごとに分離されている。セッション途中でモデルを切り替えると、内容が同一でも全体が再計算される。同じ理由で、CLAUDE.mdやルール、MCP構成をセッション途中で変更するとキャッシュが壊れる。設定はセッション開始前に固めておくのが安全だ。「速く始まったセッションが途中から遅くなる」現象の多くは、こうした変更でプレフィックスが変わり、キャッシュ命中を失っていることが原因になる。&lt;/p&gt;
+
+&lt;p&gt;なお仕様上の制約として、ブレークポイントは1リクエストにつき最大4個、各ブレークポイントは最大20コンテンツブロックまで遡って過去のキャッシュを探す。最小キャッシュ長は1,024トークン。長い会話ではブレークポイントの位置に注意がいる。&lt;/p&gt;
+
+&lt;h2 id=&quot;まとめ&quot;&gt;まとめ&lt;/h2&gt;
+
+&lt;p&gt;プロンプトは tools → system → messages の順に並び、キャッシュは先頭からの連続一致（プレフィックス）だけを再利用する。保存されるのは計算済みのK/VテンソルでVRAM上に一時的に置かれ、命中時はPrefillを飛ばせるから読み込みが10%で済む。だから設計の勘所はただ一つ、「変わらないものを先、変わるものを後」に並べ、その先頭部分を毎回バイト単位で同一に保つことに尽きる。&lt;/p&gt;
+</description><description>&lt;p&gt;MCPサーバーを一つ足しただけで、作業を始める前にトークンがごっそり消える。長いセッションが途中から急に遅く・高くなる。こうした現象の裏側には、プロンプトの「並び方」とキャッシュの関係がある。本記事では、プロンプトがどう組み立てられ、キャッシュが何をどこに保存し、なぜ順番が効くのかを、順を追って分かりやすく説明する。&lt;/p&gt;
+
+</description><pubDate>Sun, 05 Jul 2026 00:00:00 +0000</pubDate>
+        <link>https://avocado-planet.github.io/blog/prompt-structure-and-caching/</link>
+        <guid isPermaLink="true">https://avocado-planet.github.io/blog/prompt-structure-and-caching/</guid></item><item>
         <title>Agent AI CLIで数百のツール/スキルを効率よくルーティングする — retrieve-then-load 実践ガイド</title>
         <description>&lt;p&gt;AIエージェントにツールを追加していくと、いつか必ず「全部をコンテキストに載せきれない」壁にぶつかる。MCPサーバーを数個つないだだけでも、作業を始める前に数万トークンがツール定義で消える。本記事では、ツール/スキルが数百規模になったときに効率よくルーティングするための設計と、LangGraph ReActベースの自作CLIへの落とし込みを整理する。&lt;/p&gt;
 
@@ -2951,304 +3015,5 @@ AI         &quot;答えは 96 です&quot;   ← result[&apos;messages&apos;][-1
 
 </description><pubDate>Tue, 28 Apr 2026 00:00:00 +0000</pubDate>
         <link>https://avocado-planet.github.io/blog/mcp-stdio-sse-dataflow/</link>
-        <guid isPermaLink="true">https://avocado-planet.github.io/blog/mcp-stdio-sse-dataflow/</guid></item><item>
-        <title>ReAct Agentの本質を理解する — プロンプト芸か、構造的制御か？</title>
-        <description>&lt;h1 id=&quot;react-agentの本質を理解する--プロンプト芸か構造的制御か&quot;&gt;ReAct Agentの本質を理解する — プロンプト芸か、構造的制御か？&lt;/h1&gt;
-
-&lt;h2 id=&quot;はじめに&quot;&gt;はじめに&lt;/h2&gt;
-
-&lt;p&gt;LLMベースのエージェント開発において「ReAct」は最も基本的なパターンの一つです。Thought（思考）→ Action（行動）→ Observation（観察）のサイクルを繰り返すことで、LLMが外部ツールを使いながら推論を進めます。&lt;/p&gt;
-
-&lt;p&gt;しかし、ここで根本的な疑問が生じます：&lt;/p&gt;
-
-&lt;blockquote&gt;
-  &lt;p&gt;&lt;strong&gt;このサイクルは、実質的にプロンプトの指示によるものなのか？ LLMが本当にサイクルを守るかは、LLMの判断任せなのか？&lt;/strong&gt;&lt;/p&gt;
-&lt;/blockquote&gt;
-
-&lt;p&gt;本記事では、この問いに対して「原初のReAct」と「現代のフレームワーク実装」の2つの視点から掘り下げます。&lt;/p&gt;
-
-&lt;hr /&gt;
-
-&lt;h2 id=&quot;1-reactの基本サイクル&quot;&gt;1. ReActの基本サイクル&lt;/h2&gt;
-
-&lt;p&gt;ReActパターン（Yao et al., 2022）は以下のサイクルで構成されます：&lt;/p&gt;
-
-&lt;ol&gt;
-  &lt;li&gt;&lt;strong&gt;Thought（思考）&lt;/strong&gt; — 現状を分析し、次に何をすべきか考える&lt;/li&gt;
-  &lt;li&gt;&lt;strong&gt;Action（行動）&lt;/strong&gt; — ツールを呼び出す&lt;/li&gt;
-  &lt;li&gt;&lt;strong&gt;Observation（観察）&lt;/strong&gt; — ツールの実行結果を受け取る&lt;/li&gt;
-  &lt;li&gt;&lt;strong&gt;1に戻る&lt;/strong&gt; — 目的が達成されるまで繰り返す&lt;/li&gt;
-&lt;/ol&gt;
-
-&lt;hr /&gt;
-
-&lt;h2 id=&quot;2-原初のreact--プロンプト--素朴なループ&quot;&gt;2. 原初のReAct — プロンプト + 素朴なループ&lt;/h2&gt;
-
-&lt;h3 id=&quot;21-few-shotによるフォーマット誘導&quot;&gt;2.1 Few-shotによるフォーマット誘導&lt;/h3&gt;
-
-&lt;p&gt;原論文のReActでは、LLMに対して&lt;strong&gt;few-shot（少数例提示）&lt;/strong&gt;でフォーマットを学ばせていました。&lt;/p&gt;
-
-&lt;p&gt;few-shotとは、プロンプトの中に「こう振る舞え」という完成例を数個入れる手法です。LLMは明示的なルール説明ではなく、&lt;strong&gt;例のパターンを模倣&lt;/strong&gt;することで所望のフォーマットに従います。&lt;/p&gt;
-
-&lt;div class=&quot;language-text highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;以下の例に従って、質問に答えてください。
-
---- 例1 ---
-Question: コロラド造山運動の東側の地域の標高範囲は？
-Thought 1: コロラド造山運動について調べる必要がある。
-Action 1: Search[コロラド造山運動]
-Observation 1: コロラド造山運動は約3億年前に起きた造山運動で...
-Thought 2: 東側の地域について調べよう。
-Action 2: Search[High Plains 標高]
-Observation 2: High Plainsの標高は約1,800〜7,000フィート。
-Thought 3: 答えがわかった。
-Action 3: Finish[約1,800〜7,000フィート]
-
---- 例2 ---
-(同様のパターンをもう1〜2個)
-
---- 本番 ---
-Question: ユーザーの実際の質問
-Thought 1:
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
-
-&lt;p&gt;LLMはこのパターンを見て、「Thought → Action → Observation」の形式で出力すればいいと&lt;strong&gt;推測&lt;/strong&gt;します。&lt;/p&gt;
-
-&lt;blockquote&gt;
-  &lt;p&gt;&lt;strong&gt;補足：Few-shotの分類&lt;/strong&gt;&lt;/p&gt;
-  &lt;ul&gt;
-    &lt;li&gt;&lt;strong&gt;zero-shot&lt;/strong&gt; — 例なし。指示文だけ&lt;/li&gt;
-    &lt;li&gt;&lt;strong&gt;one-shot&lt;/strong&gt; — 例が1個&lt;/li&gt;
-    &lt;li&gt;&lt;strong&gt;few-shot&lt;/strong&gt; — 例が2〜5個&lt;/li&gt;
-  &lt;/ul&gt;
-&lt;/blockquote&gt;
-
-&lt;h3 id=&quot;22-ツール実行は誰がやるのか&quot;&gt;2.2 ツール実行は誰がやるのか？&lt;/h3&gt;
-
-&lt;p&gt;ここが重要なポイントです。&lt;strong&gt;LLMはテキストを生成するだけ&lt;/strong&gt;であり、実際にツールを実行する能力はありません。&lt;/p&gt;
-
-&lt;p&gt;原初のReActにも&lt;strong&gt;制御コード（外部のPythonプログラム）は存在していました&lt;/strong&gt;。&lt;/p&gt;
-
-&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;n&quot;&gt;prompt&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;few_shot_examples&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;question&lt;/span&gt;
-
-&lt;span class=&quot;k&quot;&gt;while&lt;/span&gt; &lt;span class=&quot;bp&quot;&gt;True&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;
-    &lt;span class=&quot;c1&quot;&gt;# 1. LLMに投げる（Thought + Action をテキストとして生成させる）
-&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;output&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;llm&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;prompt&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
-
-    &lt;span class=&quot;c1&quot;&gt;# 2. 出力をテキストとしてパースする（正規表現等）
-&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;action&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;parse_action&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;output&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;  &lt;span class=&quot;c1&quot;&gt;# 例: &quot;Search[東京の人口]&quot;
-&lt;/span&gt;
-    &lt;span class=&quot;k&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;action&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;nb&quot;&gt;type&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;==&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;Finish&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;
-        &lt;span class=&quot;k&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;action&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;argument&lt;/span&gt;  &lt;span class=&quot;c1&quot;&gt;# 最終回答
-&lt;/span&gt;
-    &lt;span class=&quot;c1&quot;&gt;# 3. ツールを実際に実行する（Pythonコードがやる）
-&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;observation&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;execute_tool&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;action&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;  &lt;span class=&quot;c1&quot;&gt;# Wikipedia APIを叩く等
-&lt;/span&gt;
-    &lt;span class=&quot;c1&quot;&gt;# 4. 結果をプロンプトに追記して次のループへ
-&lt;/span&gt;    &lt;span class=&quot;n&quot;&gt;prompt&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;output&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;sa&quot;&gt;f&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;&lt;/span&gt;&lt;span class=&quot;se&quot;&gt;\n&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;Observation: &lt;/span&gt;&lt;span class=&quot;si&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;observation&lt;/span&gt;&lt;span class=&quot;si&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;se&quot;&gt;\n&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;&lt;/span&gt;
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
-
-&lt;p&gt;処理の流れを整理すると：&lt;/p&gt;
-
-&lt;ol&gt;
-  &lt;li&gt;LLMが &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Action: Search[東京の人口]&lt;/code&gt; という&lt;strong&gt;文字列を出力する&lt;/strong&gt;&lt;/li&gt;
-  &lt;li&gt;外部のPythonコードがその文字列を&lt;strong&gt;正規表現でパースする&lt;/strong&gt;&lt;/li&gt;
-  &lt;li&gt;Pythonコードが実際に&lt;strong&gt;Wikipedia APIを叩く&lt;/strong&gt;&lt;/li&gt;
-  &lt;li&gt;結果を &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Observation: 東京の人口は...&lt;/code&gt; としてプロンプトに&lt;strong&gt;テキスト連結する&lt;/strong&gt;&lt;/li&gt;
-  &lt;li&gt;その拡張されたプロンプトをLLMに&lt;strong&gt;再度投げる&lt;/strong&gt;&lt;/li&gt;
-&lt;/ol&gt;
-
-&lt;p&gt;つまり、「制御コードがない時代」は存在しません。LLMは常にテキストを生成するだけで、ツール実行は必ず外部コードが担います。&lt;/p&gt;
-
-&lt;hr /&gt;
-
-&lt;h2 id=&quot;3-現代のreact--フレームワークによる構造的制御&quot;&gt;3. 現代のReAct — フレームワークによる構造的制御&lt;/h2&gt;
-
-&lt;h3 id=&quot;31-構造化-tool_call-の登場&quot;&gt;3.1 構造化 tool_call の登場&lt;/h3&gt;
-
-&lt;p&gt;原初のReActには大きな弱点がありました。LLMの出力は自由テキストなので、正規表現でのパースが壊れやすいのです。&lt;/p&gt;
-
-&lt;p&gt;この問題を解決したのが、&lt;strong&gt;LLMプロバイダー自身によるAPI仕様の構造化&lt;/strong&gt;です。&lt;/p&gt;
-
-&lt;table&gt;
-  &lt;thead&gt;
-    &lt;tr&gt;
-      &lt;th&gt;プロバイダー&lt;/th&gt;
-      &lt;th&gt;API仕様&lt;/th&gt;
-      &lt;th&gt;導入時期&lt;/th&gt;
-    &lt;/tr&gt;
-  &lt;/thead&gt;
-  &lt;tbody&gt;
-    &lt;tr&gt;
-      &lt;td&gt;OpenAI&lt;/td&gt;
-      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tool_calls&lt;/code&gt; フィールド&lt;/td&gt;
-      &lt;td&gt;2023年6月〜&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;Anthropic（Claude）&lt;/td&gt;
-      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tool_use&lt;/code&gt; content block&lt;/td&gt;
-      &lt;td&gt;2024年4月〜&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;Google（Gemini）&lt;/td&gt;
-      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;function_call&lt;/code&gt; パート&lt;/td&gt;
-      &lt;td&gt;—&lt;/td&gt;
-    &lt;/tr&gt;
-  &lt;/tbody&gt;
-&lt;/table&gt;
-
-&lt;p&gt;&lt;strong&gt;以前（自由テキスト時代）：&lt;/strong&gt;&lt;/p&gt;
-
-&lt;div class=&quot;language-text highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;LLMの出力: &quot;Thought: I need to search.\nAction: Search[東京の人口]&quot;
-→ 開発者が正規表現でパースする（壊れやすい）
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
-
-&lt;p&gt;&lt;strong&gt;現在（API構造化）：&lt;/strong&gt;&lt;/p&gt;
-
-&lt;div class=&quot;language-json highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
-  &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;tool_calls&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
-    &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
-      &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;function&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
-        &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;name&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;search&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
-        &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;arguments&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;{&lt;/span&gt;&lt;span class=&quot;se&quot;&gt;\&quot;&lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;query&lt;/span&gt;&lt;span class=&quot;se&quot;&gt;\&quot;&lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;: &lt;/span&gt;&lt;span class=&quot;se&quot;&gt;\&quot;&lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;東京の人口&lt;/span&gt;&lt;span class=&quot;se&quot;&gt;\&quot;&lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;}&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
-      &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
-    &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
-  &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
-&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
-&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
-
-&lt;p&gt;これはLLMの出力テキストではなく、&lt;strong&gt;APIレスポンスの構造化フィールド&lt;/strong&gt;です。正規表現でパースする必要がなく、LLMが「フォーマットを守るかどうか」の不確実性が排除されました。&lt;/p&gt;
-
-&lt;blockquote&gt;
-  &lt;p&gt;&lt;strong&gt;この構造化はLangChainが標準化したのではなく、LLMプロバイダー（OpenAI、Anthropic、Google等）がAPI仕様として定義したもの&lt;/strong&gt;です。LangChainはこれらプロバイダーごとの差異を統一的なインターフェースに抽象化しているだけです。&lt;/p&gt;
-&lt;/blockquote&gt;
-
-&lt;div class=&quot;language-text highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;OpenAI tool_calls ──┐
-Anthropic tool_use ──┼→ LangChain 統一 ToolCall → LangGraph のルーティング
-Gemini function_call ┘
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
-
-&lt;h3 id=&quot;32-フレームワークがサイクルを強制する&quot;&gt;3.2 フレームワークがサイクルを強制する&lt;/h3&gt;
-
-&lt;p&gt;LangChainの &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;create_react_agent&lt;/code&gt; やLangGraphでは、&lt;strong&gt;フレームワークのコード（グラフのエッジ）がサイクルの構造を制御&lt;/strong&gt;しています：&lt;/p&gt;
-
-&lt;ol&gt;
-  &lt;li&gt;LLMの出力をパースする — &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tool_call&lt;/code&gt; が返ったかどうかを判定&lt;/li&gt;
-  &lt;li&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tool_call&lt;/code&gt; があれば → ツールを実行 → 結果をメッセージに追加 → LLMに再度投げる&lt;/li&gt;
-  &lt;li&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tool_call&lt;/code&gt; がなければ → 最終回答として終了&lt;/li&gt;
-&lt;/ol&gt;
-
-&lt;div class=&quot;language-text highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;[LLM呼び出し]
-     │
-     ├─ tool_call あり → [ツール実行] → [結果追加] → [LLM呼び出し] に戻る
-     │
-     └─ tool_call なし → [終了・回答返却]
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
-
-&lt;p&gt;この分岐ロジックはPythonコード（LangGraphではconditional edge）であり、&lt;strong&gt;LLMの「気分」に左右されません&lt;/strong&gt;。&lt;/p&gt;
-
-&lt;hr /&gt;
-
-&lt;h2 id=&quot;4-制御の境界線--誰が何を制御しているか&quot;&gt;4. 制御の境界線 — 誰が何を制御しているか&lt;/h2&gt;
-
-&lt;table&gt;
-  &lt;thead&gt;
-    &lt;tr&gt;
-      &lt;th&gt;側面&lt;/th&gt;
-      &lt;th&gt;誰が制御？&lt;/th&gt;
-    &lt;/tr&gt;
-  &lt;/thead&gt;
-  &lt;tbody&gt;
-    &lt;tr&gt;
-      &lt;td&gt;サイクルの&lt;strong&gt;構造&lt;/strong&gt;（ループ・分岐）&lt;/td&gt;
-      &lt;td&gt;フレームワーク（コード）&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;サイクルの&lt;strong&gt;中身&lt;/strong&gt;（何を考え、何を呼ぶか）&lt;/td&gt;
-      &lt;td&gt;LLM&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;終了条件の&lt;strong&gt;判定ロジック&lt;/strong&gt;&lt;/td&gt;
-      &lt;td&gt;フレームワーク（tool_callの有無）&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;終了の&lt;strong&gt;意思決定&lt;/strong&gt;&lt;/td&gt;
-      &lt;td&gt;LLM（tool_callを出すか出さないか）&lt;/td&gt;
-    &lt;/tr&gt;
-  &lt;/tbody&gt;
-&lt;/table&gt;
-
-&lt;p&gt;LLMに任されている部分：&lt;/p&gt;
-
-&lt;ul&gt;
-  &lt;li&gt;&lt;strong&gt;いつツールを呼ぶか&lt;/strong&gt;（どのタイミングでAction）&lt;/li&gt;
-  &lt;li&gt;&lt;strong&gt;どのツールをどの引数で呼ぶか&lt;/strong&gt;&lt;/li&gt;
-  &lt;li&gt;&lt;strong&gt;いつ終了するか&lt;/strong&gt;（tool_callを出さない ＝ 終了の意思表示）&lt;/li&gt;
-  &lt;li&gt;&lt;strong&gt;Thoughtの質&lt;/strong&gt;（推論の正確さ）&lt;/li&gt;
-&lt;/ul&gt;
-
-&lt;hr /&gt;
-
-&lt;h2 id=&quot;5-原初と現代の比較まとめ&quot;&gt;5. 原初と現代の比較まとめ&lt;/h2&gt;
-
-&lt;table&gt;
-  &lt;thead&gt;
-    &lt;tr&gt;
-      &lt;th&gt;観点&lt;/th&gt;
-      &lt;th&gt;原初のReAct&lt;/th&gt;
-      &lt;th&gt;現代（LangChain/LangGraph等）&lt;/th&gt;
-    &lt;/tr&gt;
-  &lt;/thead&gt;
-  &lt;tbody&gt;
-    &lt;tr&gt;
-      &lt;td&gt;LLMの出力形式&lt;/td&gt;
-      &lt;td&gt;自由テキスト &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;Action: Search[X]&lt;/code&gt;&lt;/td&gt;
-      &lt;td&gt;構造化された &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tool_call&lt;/code&gt; JSON&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;パース方法&lt;/td&gt;
-      &lt;td&gt;正規表現（壊れやすい）&lt;/td&gt;
-      &lt;td&gt;APIレベルで構造化（堅牢）&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;ループ制御&lt;/td&gt;
-      &lt;td&gt;素朴なwhileループ&lt;/td&gt;
-      &lt;td&gt;グラフ構造（LangGraph）&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;ツール実行&lt;/td&gt;
-      &lt;td&gt;外部コードが実行&lt;/td&gt;
-      &lt;td&gt;外部コードが実行（同じ）&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;フォーマット遵守&lt;/td&gt;
-      &lt;td&gt;LLMの模倣能力に依存&lt;/td&gt;
-      &lt;td&gt;APIが構造を保証&lt;/td&gt;
-    &lt;/tr&gt;
-  &lt;/tbody&gt;
-&lt;/table&gt;
-
-&lt;hr /&gt;
-
-&lt;h2 id=&quot;6-結論&quot;&gt;6. 結論&lt;/h2&gt;
-
-&lt;p&gt;「ReActはプロンプトだけで実現している」は初期の素朴な実装には部分的に当てはまりますが、本質的には&lt;strong&gt;プロンプト（LLMの判断）＋ コード（構造的強制）のハイブリッド&lt;/strong&gt;です。&lt;/p&gt;
-
-&lt;p&gt;原初のReActにも外部の制御コードは存在しており、LLMは常に「テキストを出力するだけ」の存在でした。現代のフレームワークでは、構造化tool_callとグラフベースのルーティングにより、LLMに「サイクルを守れ」と祈る必要はなくなり、&lt;strong&gt;コードが構造を保証する&lt;/strong&gt;設計に進化しています。&lt;/p&gt;
-
-&lt;hr /&gt;
-
-&lt;h2 id=&quot;参考&quot;&gt;参考&lt;/h2&gt;
-
-&lt;ul&gt;
-  &lt;li&gt;Yao, S. et al. (2022). &lt;em&gt;ReAct: Synergizing Reasoning and Acting in Language Models&lt;/em&gt;&lt;/li&gt;
-  &lt;li&gt;&lt;a href=&quot;https://python.langchain.com/&quot;&gt;LangChain Documentation&lt;/a&gt;&lt;/li&gt;
-  &lt;li&gt;&lt;a href=&quot;https://langchain-ai.github.io/langgraph/&quot;&gt;LangGraph Documentation&lt;/a&gt;&lt;/li&gt;
-  &lt;li&gt;&lt;a href=&quot;https://platform.openai.com/docs/guides/function-calling&quot;&gt;OpenAI Function Calling&lt;/a&gt;&lt;/li&gt;
-  &lt;li&gt;&lt;a href=&quot;https://docs.anthropic.com/en/docs/build-with-claude/tool-use/overview&quot;&gt;Anthropic Tool Use&lt;/a&gt;&lt;/li&gt;
-&lt;/ul&gt;
-</description><description>&lt;h1 id=&quot;react-agentの本質を理解する--プロンプト芸か構造的制御か&quot;&gt;ReAct Agentの本質を理解する — プロンプト芸か、構造的制御か？&lt;/h1&gt;
-
-</description><pubDate>Sun, 19 Apr 2026 00:00:00 +0000</pubDate>
-        <link>https://avocado-planet.github.io/blog/react-agent-deep-dive/</link>
-        <guid isPermaLink="true">https://avocado-planet.github.io/blog/react-agent-deep-dive/</guid></item></channel>
+        <guid isPermaLink="true">https://avocado-planet.github.io/blog/mcp-stdio-sse-dataflow/</guid></item></channel>
 </rss>
