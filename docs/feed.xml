@@ -5,8 +5,8 @@
     <description>Tech blog on AI, ServiceNow, and cloud engineering</description>
     <link>https://avocado-planet.github.io/</link>
     <atom:link href="https://avocado-planet.github.io/feed.xml" rel="self" type="application/rss+xml"/>
-    <pubDate>Sun, 05 Jul 2026 00:29:03 +0000</pubDate>
-    <lastBuildDate>Sun, 05 Jul 2026 00:29:03 +0000</lastBuildDate>
+    <pubDate>Sun, 05 Jul 2026 07:34:08 +0000</pubDate>
+    <lastBuildDate>Sun, 05 Jul 2026 07:34:08 +0000</lastBuildDate>
     <generator>Jekyll v3.10.0</generator><item>
         <title>Claudeのプロンプト構造とキャッシュを理解する — 「静的を先、動的を後」がなぜ効くのか</title>
         <description>&lt;p&gt;MCPサーバーを一つ足しただけで、作業を始める前にトークンがごっそり消える。長いセッションが途中から急に遅く・高くなる。こうした現象の裏側には、プロンプトの「並び方」とキャッシュの関係がある。本記事では、プロンプトがどう組み立てられ、キャッシュが何をどこに保存し、なぜ順番が効くのかを、順を追って分かりやすく説明する。&lt;/p&gt;
