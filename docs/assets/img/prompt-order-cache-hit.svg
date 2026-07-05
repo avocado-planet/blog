@@ -1,0 +1,35 @@
+<svg width="100%" viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg" font-family="'Helvetica Neue',Arial,'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif">
+  <text x="30" y="26" font-size="15" font-weight="600" fill="#1e293b">リクエストの並びとキャッシュ命中範囲</text>
+  <text x="690" y="26" font-size="12" fill="#64748b" text-anchor="end">先頭 → 末尾（tools → system → messages）</text>
+
+  <!-- stable blocks -->
+  <rect x="30" y="46" width="150" height="56" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="105" y="74" text-anchor="middle" font-size="14" font-weight="600" fill="#1e3a8a">ツール定義</text>
+  <text x="105" y="92" text-anchor="middle" font-size="11.5" fill="#1d4ed8">安定</text>
+
+  <rect x="190" y="46" width="150" height="56" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="265" y="74" text-anchor="middle" font-size="14" font-weight="600" fill="#1e3a8a">システム</text>
+  <text x="265" y="92" text-anchor="middle" font-size="11.5" fill="#1d4ed8">安定</text>
+
+  <rect x="350" y="46" width="150" height="56" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="425" y="74" text-anchor="middle" font-size="14" font-weight="600" fill="#1e3a8a">会話履歴</text>
+  <text x="425" y="92" text-anchor="middle" font-size="11.5" fill="#1d4ed8">直近以外は安定</text>
+
+  <!-- dynamic block -->
+  <rect x="510" y="46" width="180" height="56" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="1.5"/>
+  <text x="600" y="74" text-anchor="middle" font-size="14" font-weight="600" fill="#92400e">今回の入力</text>
+  <text x="600" y="92" text-anchor="middle" font-size="11.5" fill="#b45309">毎回変わる</text>
+
+  <!-- prefix bracket -->
+  <path d="M30 118 L30 126 L500 126 L500 118" fill="none" stroke="#0d9488" stroke-width="1.5"/>
+  <text x="265" y="146" text-anchor="middle" font-size="12.5" fill="#0f766e">プレフィックス（前回と一致）→ キャッシュ再利用・入力の10%課金</text>
+
+  <path d="M510 118 L510 126 L690 126 L690 118" fill="none" stroke="#d97706" stroke-width="1.5"/>
+  <text x="600" y="146" text-anchor="middle" font-size="12.5" fill="#b45309">新規に計算</text>
+
+  <!-- note -->
+  <rect x="30" y="180" width="660" height="86" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="50" y="212" font-size="13" fill="#334155">照合は先頭から。安定した部分が前回と同じなら、その範囲をまるごと再利用できる。</text>
+  <text x="50" y="236" font-size="13" fill="#334155">先頭のバイトが1つでも変わると、そこから後ろは変わっていなくても全部再計算になる。</text>
+  <text x="50" y="256" font-size="13" font-weight="600" fill="#0f766e">だから「変わらないものを先、変わるものを後」に並べる。</text>
+</svg>
