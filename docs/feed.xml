@@ -5,9 +5,620 @@
     <description>Tech blog on AI, ServiceNow, and cloud engineering</description>
     <link>https://avocado-planet.github.io/</link>
     <atom:link href="https://avocado-planet.github.io/feed.xml" rel="self" type="application/rss+xml"/>
-    <pubDate>Sun, 05 Jul 2026 07:34:08 +0000</pubDate>
-    <lastBuildDate>Sun, 05 Jul 2026 07:34:08 +0000</lastBuildDate>
+    <pubDate>Sat, 24 Oct 2026 02:16:43 +0000</pubDate>
+    <lastBuildDate>Sat, 24 Oct 2026 02:16:43 +0000</lastBuildDate>
     <generator>Jekyll v3.10.0</generator><item>
+        <title>AIと会話するとき中で何が起きているか：「量子力学はなんですか？」が回答になるまで</title>
+        <description>&lt;h2 id=&quot;全体像&quot;&gt;全体像&lt;/h2&gt;
+
+&lt;p&gt;質問文は「分割 → ベクトル化 → 層を重ねる → 1語選ぶ」の4段階を通り、選んだ1語を末尾に足して、終了まで繰り返されます。&lt;/p&gt;
+
+&lt;p&gt;この記事は、「量子力学はなんですか？」という質問を例に、入力から回答の完了までを順に追います。説明に使う数字は、すべて仮のものです。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;ベクトルは4次元（実際は数千次元）&lt;/li&gt;
+  &lt;li&gt;層は3つ（実際は数十層以上）&lt;/li&gt;
+  &lt;li&gt;注意のヘッドは1つ（実際は複数）&lt;/li&gt;
+  &lt;li&gt;トークンは「量子 / 力学 / は / なんですか / ？」の5つ（実際の区切りはモデルによって違う）&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;先に出てくる用語を、短く説明します。詳しくは手順3で扱います。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;注意：各位置が、前の位置を見て情報を集める処理です。&lt;/li&gt;
+  &lt;li&gt;FFN：各位置のベクトルを、その位置だけで加工する処理です。&lt;/li&gt;
+  &lt;li&gt;K・V：注意で使う、「自分は何か」を表すベクトル（K）と、「運ぶ中身」を表すベクトル（V）です。&lt;/li&gt;
+  &lt;li&gt;位置：入力の中の、トークン1つ分の場所です。&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;層数やヘッド数などの実例は、公表されている目安です。モデルごとに違い、非公開のものも多くあります。&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/blog/assets/img/llm-walkthrough-fig1-flow.svg&quot; alt=&quot;全体の流れ：4つの箱を左から右へ進み、選ばれた語が入力の末尾に戻るループ&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;図1：4つの箱を左から右へ進みます。選ばれた語は新しい位置として2番目の箱に戻り、終了トークンが選ばれるまで続きます。&lt;/p&gt;
+
+&lt;h2 id=&quot;学習済みで固定のものと毎回変わるもの&quot;&gt;学習済みで固定のものと、毎回変わるもの&lt;/h2&gt;
+
+&lt;p&gt;回答中に変わるのは、入力から計算される途中の数字だけです。学習で決まったパラメータは、1つも変わりません。&lt;/p&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;区分&lt;/th&gt;
+      &lt;th&gt;具体例&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;固定（学習で決まる）&lt;/td&gt;
+      &lt;td&gt;埋め込み表、各層のQ・K・V用の重み、FFNの重みと偏置、出力行列&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;毎回計算される&lt;/td&gt;
+      &lt;td&gt;各位置のベクトル、Q・K・V、注意の比率、各層の出力、点数、確率&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;パラメータは最初は乱数で、訓練で少しずつ調整されます。誤差を測り、逆伝播（誤差から、各パラメータをどちらにどれだけ直すかを逆向きに求める方法）で各パラメータの寄与を求め、小さく直す作業を何度も繰り返します。&lt;/li&gt;
+  &lt;li&gt;層ごとに重みは別です。層1と層2は、同じ形の別の計算をします。&lt;/li&gt;
+  &lt;li&gt;注意の比率（0.35など）は、乱数から反復して求めるものではありません。固定の重みを使って、入力のたびに一度だけ計算します。&lt;/li&gt;
+  &lt;li&gt;事前学習で得られるのは、具体的な比率ではなく、「どう探すか」という通用する規則です。通用する範囲は、訓練データの範囲に左右されます。&lt;/li&gt;
+  &lt;li&gt;訓練の最中は、全位置が同時に「それぞれの次のトークン」を予測します。未来の位置は遮罩で見えません。&lt;/li&gt;
+  &lt;li&gt;微調整や、RLHF（人間の評価を使って答え方を調整する訓練）では、重みが再び変わります。一方、提示文に例を入れる（少数ショット）だけでは重みは変わらず、入力が変わるので出力が変わります。&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h2 id=&quot;手順1分割トークン化&quot;&gt;手順1　分割（トークン化）&lt;/h2&gt;
+
+&lt;p&gt;モデルは文字を読めないので、文を語彙表にある「トークン」に切り分け、番号に直します。&lt;/p&gt;
+
+&lt;p&gt;例（番号は仮）：量子 → 38721、力学 → 5520、は → 9、なんですか → …、？ → …。トークンは、1文字、1語、語の一部のどれにもなります。語彙表の大きさは、GPT-3で約5万です。この段階は表を引いて切るだけの機械的な処理で、理解は入っていません。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;実際のチャットでは、システムの指示や、発言の開始・終了を示す特別なトークンが前後に付きます。&lt;/li&gt;
+  &lt;li&gt;そのため、予測の起点になる最後の位置は、「？」ではなく「ここからアシスタントが答える」を示す特別なトークンです。この記事の例は、説明を簡単にするため「？」を最後としています。&lt;/li&gt;
+  &lt;li&gt;「量子力学」が1つのトークンになるモデルもあります。その場合は、分割されず最初から1つとして扱われます。&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h2 id=&quot;手順2ベクトル化埋め込み&quot;&gt;手順2　ベクトル化（埋め込み）&lt;/h2&gt;
+
+&lt;p&gt;トークン番号で埋め込み表を引き、数字の列（ベクトル）に変えます。ここから先は、すべて数字の計算です。&lt;/p&gt;
+
+&lt;p&gt;例（4次元）：量子 → (0.2, −0.8, 0.5, 1.1)、力学 → (0.3, −0.7, 0.4, 0.9)、は → (−0.1, 0.0, 0.2, 0.1)。実際のモデルでは数千次元以上で、GPT-3は12288次元とされています。意味の近い語は近くに並び、「国王 − 男 + 女 ≒ 王妃」のような関係も、距離として表れます。ただし、語の意味そのものが数字に入っているのではなく、訓練で得られた統計的な規則です。&lt;/p&gt;
+
+&lt;p&gt;位置情報も加えます。これがないと、「量子力学はなんですか」と「なんですか量子力学は」を区別できません。方式はモデルによって違います。&lt;/p&gt;
+
+&lt;h3 id=&quot;モデルごとに違う&quot;&gt;モデルごとに違う&lt;/h3&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;次元数、語彙表、座標系（各数字の意味）が違います。&lt;/li&gt;
+  &lt;li&gt;構造が同じモデルを、乱数の初期値だけ変えて学び直しても、数字は互換になりません。&lt;/li&gt;
+  &lt;li&gt;そのため、あるモデルのベクトルを別のモデルに入れても意味をなしません。検索用の埋め込みAPIもモデルごとに別の空間で、モデルを変えたら保存済みのベクトルを作り直します。&lt;/li&gt;
+  &lt;li&gt;一方、意味の近さという構造は、モデルが違っても似る傾向があると報告されています。&lt;/li&gt;
+  &lt;li&gt;ベースモデルから派生したモデルは、語彙表と埋め込みを共有することがあります。&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h3 id=&quot;固定か変わるか2種類のベクトル&quot;&gt;固定か、変わるか：2種類のベクトル&lt;/h3&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt; &lt;/th&gt;
+      &lt;th&gt;初期ベクトル&lt;/th&gt;
+      &lt;th&gt;各層のあとのベクトル&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;同じトークンなら&lt;/td&gt;
+      &lt;td&gt;同じ&lt;/td&gt;
+      &lt;td&gt;文脈で違う&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;由来&lt;/td&gt;
+      &lt;td&gt;埋め込み表を引く&lt;/td&gt;
+      &lt;td&gt;層ごとの計算&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;訓練が終わったら&lt;/td&gt;
+      &lt;td&gt;固定&lt;/td&gt;
+      &lt;td&gt;入力のたびに計算&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;例えば「アップル」という同じトークンでも、注意を通ると、「パイを焼いた」の文では果物寄り、「新製品を出した」の文では会社寄りのベクトルになります。これが右の列の話です。初期ベクトルの表自体は、微調整で更新されることがあります（LoRAなどでは凍結することが多い）。&lt;/p&gt;
+
+&lt;h2 id=&quot;手順3層1の中身注意とffn&quot;&gt;手順3　層1の中身（注意とFFN）&lt;/h2&gt;
+
+&lt;p&gt;1層は「注意で位置どうしが情報を混ぜ、FFNで各位置が加工する」2段で、どちらも元のベクトルへの足し戻しを伴います。&lt;/p&gt;
+
+&lt;h3 id=&quot;注意誰を見るかをその場で計算する&quot;&gt;注意：誰を見るかを、その場で計算する&lt;/h3&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;各位置のベクトルに、学習済みの重み行列を掛けて、Q（何を探すか）、K（自分は何か）、V（運ぶ中身）を作ります。&lt;/li&gt;
+  &lt;li&gt;「？」のQと、各位置のKの内積を取り、点数にします。&lt;/li&gt;
+  &lt;li&gt;点数をsoftmaxで比率にして（大きい点数ほど大きな比率に、全部足すと1になるよう直す計算です）、その比率でVを足し合わせます。これが注意の出力です。&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;「？」のQを(1, 2)とした仮の計算です（Q・Kは2次元）。&lt;/p&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;相手&lt;/th&gt;
+      &lt;th&gt;K&lt;/th&gt;
+      &lt;th&gt;内積&lt;/th&gt;
+      &lt;th&gt;÷√2&lt;/th&gt;
+      &lt;th&gt;softmax後&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;量子&lt;/td&gt;
+      &lt;td&gt;(1, 0)&lt;/td&gt;
+      &lt;td&gt;1&lt;/td&gt;
+      &lt;td&gt;0.71&lt;/td&gt;
+      &lt;td&gt;0.06&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;力学&lt;/td&gt;
+      &lt;td&gt;(2, 1)&lt;/td&gt;
+      &lt;td&gt;4&lt;/td&gt;
+      &lt;td&gt;2.83&lt;/td&gt;
+      &lt;td&gt;0.51&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;は&lt;/td&gt;
+      &lt;td&gt;(0, 1)&lt;/td&gt;
+      &lt;td&gt;2&lt;/td&gt;
+      &lt;td&gt;1.41&lt;/td&gt;
+      &lt;td&gt;0.12&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;なんですか&lt;/td&gt;
+      &lt;td&gt;(0, 0.5)&lt;/td&gt;
+      &lt;td&gt;1&lt;/td&gt;
+      &lt;td&gt;0.71&lt;/td&gt;
+      &lt;td&gt;0.06&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;？&lt;/td&gt;
+      &lt;td&gt;(1, 1)&lt;/td&gt;
+      &lt;td&gt;3&lt;/td&gt;
+      &lt;td&gt;2.12&lt;/td&gt;
+      &lt;td&gt;0.25&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;合計は1.00です。「力学」に最も多く注意が向くので、Vの足し合わせでは「力学」の成分が約半分を占めます。この数字は説明用です。実際の比率は層とヘッドごとに違い、自分自身への注意も含みます。&lt;/p&gt;
+
+&lt;h3 id=&quot;遮罩見えるのは自分より前だけ&quot;&gt;遮罩：見えるのは自分より前だけ&lt;/h3&gt;
+
+&lt;p&gt;生成モデルでは、各位置から見えるのは自分より前の位置だけです。「量子」の位置は自分しか見えず、重みは1.0になります。「力学」の位置は、「量子」と自分だけを見ます。「？」だけが、5つすべてを見ます。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;後ろの語は見えませんが、後ろの位置が前を見ます。「量子力学」という組み合わせは、「力学」の位置で整理されます。&lt;/li&gt;
+  &lt;li&gt;質問文だけで見れば「量子」は手がかりが少ない位置です。ただしチャットでは、その前にシステムの指示などのトークンがあり、それらは見えます。&lt;/li&gt;
+  &lt;li&gt;前と後ろを両方見られるのは、BERTのようなエンコーダ型のモデルです。&lt;/li&gt;
+  &lt;li&gt;後ろの語が来ても、前の位置のK・Vは変わりません。前の位置は後ろを見ないので、同じ入力から同じ値が出るからです。そのため、一度計算したK・Vを保存して使い回せます（KVキャッシュ。図7を参照）。&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h3 id=&quot;多頭同じ入力に複数の見方を同時に走らせる&quot;&gt;多頭：同じ入力に、複数の見方を同時に走らせる&lt;/h3&gt;
+
+&lt;p&gt;1つの層の中に複数のヘッドがあり、それぞれ独立したQ・K・V用の重みで注意を計算します。結果は連結し、行列を掛けて元の次元に戻します。同じ文を複数人が別々の観点（誰が何をしたか、いつか、など）で読み、あとで結果をまとめるようなものです。&lt;/p&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt; &lt;/th&gt;
+      &lt;th&gt;多頭（ヘッド）&lt;/th&gt;
+      &lt;th&gt;層&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;増やす方向&lt;/td&gt;
+      &lt;td&gt;横（並列）&lt;/td&gt;
+      &lt;td&gt;縦（直列）&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;入力&lt;/td&gt;
+      &lt;td&gt;同じ層の同じ入力を全ヘッドが受ける&lt;/td&gt;
+      &lt;td&gt;1つ下の層の出力&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;役割&lt;/td&gt;
+      &lt;td&gt;同時に複数の関係を捉える&lt;/td&gt;
+      &lt;td&gt;結果を積み上げ、情報を遠くへ伝える&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;重み&lt;/td&gt;
+      &lt;td&gt;ヘッドごとに別&lt;/td&gt;
+      &lt;td&gt;層ごとに別&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;総ヘッド数は「層数 × 1層のヘッド数」です。原論文のモデルは6層で各層8ヘッド、GPT-3は96層で各層96ヘッドとされています。1ヘッドの次元は、全体の次元をヘッド数で割った小さな値です。そのため、ヘッドを増やしても計算量はほぼ変わりません。&lt;/p&gt;
+
+&lt;h3 id=&quot;足し戻しと正規化&quot;&gt;足し戻しと正規化&lt;/h3&gt;
+
+&lt;p&gt;注意の出力は、元のベクトルに足し戻します（残差接続）。そのあと、数字の大きさをそろえます（正規化）。元の情報を残したまま新しい情報を上乗せする仕組みなので、層を重ねても、自分の位置の情報は消えません。&lt;/p&gt;
+
+&lt;p&gt;足し戻しは、数字ごとの足し算です。元のベクトル x の1番目と、注意の出力 a の1番目を足し、2番目どうし、3番目どうし、4番目どうしも同じように足します。&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/blog/assets/img/llm-walkthrough-fig2-residual.svg&quot; alt=&quot;足し戻し：xとaを数字ごとに足してx+aになる&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;図2：上の2段を数字ごとに足したものが、一番下の結果です。&lt;/p&gt;
+
+&lt;p&gt;足し戻す意味は、次のとおりです。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;a は、「元の値を、周囲の情報でどう直すか」という修正量です。足すので、元の値が土台として残り、a の分だけ動きます。&lt;/li&gt;
+  &lt;li&gt;a が正なら増え、負なら減ります。2番目は 0.4 が −0.1 で 0.3 になり、3番目は −0.2 が 0.2 で打ち消されて 0.0 になります。&lt;/li&gt;
+  &lt;li&gt;足し戻さず a だけを次に渡すと、元の語の情報が消えてしまいます。&lt;/li&gt;
+  &lt;li&gt;層を重ねても元の情報が残ります。また、訓練のとき誤差の信号が元の経路を通りやすくなることも知られています。&lt;/li&gt;
+  &lt;li&gt;この数字は仮です。実際は数千次元で、同じ足し算を全部の次元で行います。a の値は、注意の計算から出てきます。&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h3 id=&quot;ffn各位置のベクトルを個別に加工する&quot;&gt;FFN：各位置のベクトルを個別に加工する&lt;/h3&gt;
+
+&lt;p&gt;FFNは、他の位置を見ずに、各位置のベクトルを同じ重みで個別に変換します。次元を4倍程度の中間まで広げ（4 → 16 → 4）、元の次元に戻します。&lt;/p&gt;
+
+&lt;p&gt;神経元1個の計算例です。入力は(2, 3, −1)、重みは(0.5, 0.1, 0.4)、偏置は0.2とします。&lt;/p&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;手順&lt;/th&gt;
+      &lt;th&gt;計算&lt;/th&gt;
+      &lt;th&gt;結果&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;① 重みを掛ける&lt;/td&gt;
+      &lt;td&gt;2×0.5、3×0.1、−1×0.4&lt;/td&gt;
+      &lt;td&gt;1.0、0.3、−0.4&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;② 足す&lt;/td&gt;
+      &lt;td&gt;1.0 + 0.3 − 0.4&lt;/td&gt;
+      &lt;td&gt;0.9&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;③ 偏置を足す&lt;/td&gt;
+      &lt;td&gt;0.9 + 0.2&lt;/td&gt;
+      &lt;td&gt;1.1&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;④ 活性化&lt;/td&gt;
+      &lt;td&gt;負なら0、正ならそのまま&lt;/td&gt;
+      &lt;td&gt;1.1&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;重みと偏置が、訓練で調整されるパラメータです。同じ入力に対し、重みの違う神経元を何千個も並べて同時に計算すると、出力は数千個の数字（新しいベクトル）になります。&lt;/p&gt;
+
+&lt;p&gt;活性化がないと、何層重ねても全体が1回の掛け算と足し算にまとまってしまいます。「負なら0」のような非線形の処理を挟むから、層を重ねる意味が生まれます。&lt;/p&gt;
+
+&lt;p&gt;FFNが必要な理由は、次のとおりです。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;注意は情報を集めて混ぜるのは得意ですが、集めたものを加工する力は弱いです。注意は会議で他の人の意見を聞くこと、FFNは聞いた内容を持ち帰って考えることにたとえられます。&lt;/li&gt;
+  &lt;li&gt;活性化により、「この特徴とこの特徴が同時にあるときだけ反応する」といった判断ができます。&lt;/li&gt;
+  &lt;li&gt;事実のような知識が蓄えられている場所だという有力な仮説がありますが、確定していません。&lt;/li&gt;
+  &lt;li&gt;標準的なTransformerでは、パラメータの約3分の2を占めます。&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h3 id=&quot;層1の出力&quot;&gt;層1の出力&lt;/h3&gt;
+
+&lt;p&gt;層1の出力は「新しいV」ではなく、各位置の新しいベクトルです（入力と同じ次元）。「？」の位置の仮の計算は、次のとおりです。正規化の位置はモデルによって違うので、省いています。&lt;/p&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;手順&lt;/th&gt;
+      &lt;th&gt;結果&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;入力 x&lt;/td&gt;
+      &lt;td&gt;(0.1, 0.4, −0.2, 0.6)&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;注意の出力 a&lt;/td&gt;
+      &lt;td&gt;(0.3, −0.1, 0.2, 0.2)&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;x + a（足し戻し）&lt;/td&gt;
+      &lt;td&gt;(0.4, 0.3, 0.0, 0.8)&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;FFNの出力 f&lt;/td&gt;
+      &lt;td&gt;(0.1, 0.2, −0.3, 0.1)&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;足し戻して出力&lt;/td&gt;
+      &lt;td&gt;(0.5, 0.5, −0.3, 0.9)&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;Vは、注意が新しく作るものではありません。入力に重みを掛けて作る、材料の1つです。新しいQ・K・Vが作られるのは、層2です。&lt;/p&gt;
+
+&lt;h3 id=&quot;ffnは個別なのに階層ができる理由&quot;&gt;FFNは個別なのに、階層ができる理由&lt;/h3&gt;
+
+&lt;p&gt;FFNは単語ごとの処理ですが、そのベクトルは、直前の注意で他の語の情報を含んでいます。注意が混ぜ、FFNが整理することを、層ごとに交互に繰り返します。層が進むたびに、前の層で整理された情報を材料に、さらに関係を見ます。&lt;/p&gt;
+
+&lt;p&gt;これが、「語 → 句 → 文 → 主旨」と抽象度が上がっていく仕組みです。ただし、この階層は画像認識の「辺 → 形 → 部品 → 全体」からの類推です。実際は、役割がきれいに分かれず、複数の処理が混在することが研究で示されています。各層が何をしているかは、確実には分かっていません。&lt;/p&gt;
+
+&lt;h2 id=&quot;並列と順番同じ層の中は同時層をまたぐと順番&quot;&gt;並列と順番：同じ層の中は同時、層をまたぐと順番&lt;/h2&gt;
+
+&lt;p&gt;5つの位置は、各層の中では同時に計算されます。層をまたぐときだけ、「下の層が全部終わってから」という順番になります。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;層1の「？」は、入力のベクトルだけを使います。他の位置の計算を待ちません。&lt;/li&gt;
+  &lt;li&gt;層2の「？」は、層1の全位置の出力を材料にします。そのため層1が終わってから始まります。&lt;/li&gt;
+  &lt;li&gt;つまり「？」が待つのは、前のトークンの全処理ではなく、前の層の結果がそろうことです。同じ層の中では、他の位置を待ちません。&lt;/li&gt;
+  &lt;li&gt;層の入力は1つ下の層の出力で、層の出力は、その層が作る新しいベクトルです。同じ層の出力は、同時に計算している最中でまだ存在しないので、材料にできません。&lt;/li&gt;
+  &lt;li&gt;同じ層の位置を同時に計算できるのは、Q・K・Vの作成が位置ごとに独立しているからです。全位置を1つの大きな行列にまとめて一度に計算できるので、GPUに向いています。語を1つずつ順に読む従来の方式（RNN）では、前の語の処理が終わるまで次に進めませんでした。この弱点を、これで解消しました。&lt;/li&gt;
+  &lt;li&gt;例外：回答を作る段階（デコード）では並列になりません。次のトークンは、直前に選んだトークンが決まってからでないと計算できないので、1つずつ順番に生成されます。回答が逐語的に出てくるのは、この性質によるものです。&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;&lt;img src=&quot;/blog/assets/img/llm-walkthrough-fig3-parallel.svg&quot; alt=&quot;並列と順番：入力、層1、層2の3行×5位置。層2の「？」だけが層1の全位置から矢印を受ける&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;図3：同じ層の中の5位置は、同時に計算されます。「？」の層2の計算は、層1の全位置の出力（色つきの線）がそろってから始まります。&lt;/p&gt;
+
+&lt;h2 id=&quot;層を重ねる同じ構造を別の重みで&quot;&gt;層を重ねる：同じ構造を、別の重みで&lt;/h2&gt;
+
+&lt;p&gt;層2以降も、層1と同じ手順を、別の重みで、1つ下の層の出力を入力にして繰り返します。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;層2の入力は、層1の出力（5位置分のベクトル）です。層3は層2の出力を、層4は層3の出力を入力にします。&lt;/li&gt;
+  &lt;li&gt;構造は同じですが、重みは層ごとに別で、学習で別々に調整されています。&lt;/li&gt;
+  &lt;li&gt;材料の中身も違います。層1の入力は単語そのものに近いベクトルですが、層2の入力は、すでに周囲の情報が混ざったベクトルです。そのため、同じ「？」でも、層2では層1と別の観点で他の位置との関係を計算します。&lt;/li&gt;
+  &lt;li&gt;層数は、GPT-1が12層、GPT-3が96層とされています。最近のモデルの層数は、多くが非公開です。&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;&lt;img src=&quot;/blog/assets/img/llm-walkthrough-fig4-layers.svg&quot; alt=&quot;層ごとの情報の伝わり方：りんご、を、食べたの3語を、入力・層1・層2の3段で示す&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;図4：層1で「を」が「りんご」を取り込みます。破線のように、「食べた」は層1でも「りんご」を直接見られます。層2では、すでに「りんご」の情報を含む「を」も材料にできます。層を重ねるのは、範囲を広げるためではなく、整理済みの情報を重ねるためです。&lt;/p&gt;
+
+&lt;h3 id=&quot;見る範囲は層ごとに広がるのか&quot;&gt;見る範囲は、層ごとに広がるのか&lt;/h3&gt;
+
+&lt;p&gt;標準的な（全結合の）注意では、見られる範囲は全層で同じです。生成モデルなら、どの層でも自分より前の全トークンを見られます。層1でも、遠くの語に直接注意を向けられます。&lt;/p&gt;
+
+&lt;p&gt;層ごとに変わるのは、範囲ではなく材料の抽象度です。層2以降で見るのは、前の層で整理されたベクトルです。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;例外：スライディングウィンドウ方式では、各層は直近の一定個数だけを見ます。ただし層を重ねると情報が間接的に伝わるので、L層でおよそ「L × 窓の幅」先まで届きます。&lt;/li&gt;
+  &lt;li&gt;例外：局所的な注意と全体の注意を、層ごとに交互に使うモデルもあります。&lt;/li&gt;
+  &lt;li&gt;同じ層の中でも、ヘッドによって近くの語ばかり見るもの、遠くの語を見るもの、先頭トークンに向くものが混在します。浅い層は近くを見るヘッドが多い傾向が観察されていますが、設計上の決まりではありません。&lt;/li&gt;
+  &lt;li&gt;商用モデルがどの方式かは、多くの場合公開されていません。&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;&lt;img src=&quot;/blog/assets/img/llm-walkthrough-fig5-three-layers.svg&quot; alt=&quot;3層の全体図：埋め込みから層1・2・3を経て、最上層の「？」の位置だけが出力行列に進み、選ばれた語が入力末尾に戻る&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;図5：下から上へ、手順①②③の順に進みます。最上層では「？」の位置だけが確率の計算に使われ、選ばれた語は右の矢印で入力の末尾に戻ります。&lt;/p&gt;
+
+&lt;h2 id=&quot;最後の層と最後の位置&quot;&gt;最後の層と最後の位置&lt;/h2&gt;
+
+&lt;p&gt;予測に使うのは、最上層の最後の位置のベクトルだけです。他の位置の最上層の出力は、予測に使いません。&lt;/p&gt;
+
+&lt;p&gt;次の2点は区別して考えます。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;最後の位置が使うもの：最上層でも「？」は、全位置のK・Vを参照します。このK・Vは、1つ下の層の出力から作ります。&lt;/li&gt;
+  &lt;li&gt;他の位置の最上層の出力（注意の出力やFFN）：予測にも、今後の計算にも使いません。そのため、省く実装があります。実装によっては、全位置分を計算して最後の位置だけを使います。&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;学習時は事情が違います。全位置が、それぞれの次の語を予測するので、最上層でも全位置の出力が必要です。推論時に最後の位置だけを使うのは、「？」の次の語、つまり回答の最初を知りたいからです。&lt;/p&gt;
+
+&lt;p&gt;最後の位置のベクトルは、前の層を通じて前文全体の情報を取り込んでいます。そのため、「前文をもとに予測する」と「最後のトークンの位置から予測する」は、実質的に同じことを指します。単独のトークンの意味だけで予測しているのではありません。&lt;/p&gt;
+
+&lt;p&gt;入力を読み込む段階（プレフィル）でも、途中の層は全位置を計算します。その結果のK・Vを保存して、あとで使い回します。&lt;/p&gt;
+
+&lt;h2 id=&quot;出力の変換ベクトルから次の1語へ&quot;&gt;出力の変換：ベクトルから「次の1語」へ&lt;/h2&gt;
+
+&lt;p&gt;最後の位置のベクトルに出力行列を掛けて、語彙全体の点数を出し、softmaxで確率にして、抽選で1語を選びます。&lt;/p&gt;
+
+&lt;p&gt;仮の例です。最後の位置のベクトルを h = (0.5, 0.5, −0.3, 0.9) とし、出力行列の各列は1つのトークンに対応します。点数は、h とその列の内積です。&lt;/p&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;トークン&lt;/th&gt;
+      &lt;th&gt;その列の重み&lt;/th&gt;
+      &lt;th&gt;内積（点数）&lt;/th&gt;
+      &lt;th&gt;確率&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;量子&lt;/td&gt;
+      &lt;td&gt;(1.0, 0.5, 0.0, 1.5)&lt;/td&gt;
+      &lt;td&gt;2.10&lt;/td&gt;
+      &lt;td&gt;67%&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;物理&lt;/td&gt;
+      &lt;td&gt;(0.8, 0.2, 0.1, 1.0)&lt;/td&gt;
+      &lt;td&gt;1.37&lt;/td&gt;
+      &lt;td&gt;32%&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;炒菜&lt;/td&gt;
+      &lt;td&gt;(−1.0, −0.5, 0.5, −1.0)&lt;/td&gt;
+      &lt;td&gt;−1.80&lt;/td&gt;
+      &lt;td&gt;1%&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;p&gt;「量子」の点数は、0.5×1.0 + 0.5×0.5 + (−0.3)×0.0 + 0.9×1.5 = 2.10 です。softmaxは、点数を指数にして（8.17、3.94、0.17）合計で割ります。実際は、列が語彙の数だけ（約5万〜数十万）あります。この表は候補3つだけの仮の例なので、確率の合計が100%に見えます。&lt;/p&gt;
+
+&lt;p&gt;&lt;img src=&quot;/blog/assets/img/llm-walkthrough-fig6-output.svg&quot; alt=&quot;出力の変換：最後の位置のベクトルと出力行列の各列の内積が点数になり、softmaxで確率になる&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;図6：左の色つきの列が、最後の位置のベクトルです。出力行列の各列との内積が点数になり、softmaxで確率に変わり、抽選で1語が選ばれます。&lt;/p&gt;
+
+&lt;h3 id=&quot;注意ではない&quot;&gt;注意ではない&lt;/h3&gt;
+
+&lt;p&gt;内積を使う点は似ていますが、役割が違います。&lt;/p&gt;
+
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt; &lt;/th&gt;
+      &lt;th&gt;注意&lt;/th&gt;
+      &lt;th&gt;出力の変換&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;tr&gt;
+      &lt;td&gt;相手&lt;/td&gt;
+      &lt;td&gt;同じ文の中の他の位置&lt;/td&gt;
+      &lt;td&gt;語彙の全トークン（約5万個）&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;Q・K・Vを作るか&lt;/td&gt;
+      &lt;td&gt;作る&lt;/td&gt;
+      &lt;td&gt;作らない（掛け算1回）&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;内積のあと&lt;/td&gt;
+      &lt;td&gt;比率でVを足し合わせ、新しいベクトルを作る&lt;/td&gt;
+      &lt;td&gt;点数を確率にして終わり&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;tr&gt;
+      &lt;td&gt;結果&lt;/td&gt;
+      &lt;td&gt;文脈を取り込んだベクトル&lt;/td&gt;
+      &lt;td&gt;次に来るトークンの確率&lt;/td&gt;
+    &lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;出力行列も学習済みで、推論中は固定です。&lt;/li&gt;
+  &lt;li&gt;入力の埋め込み表と同じ数字を（転置して）共有するモデルもあります。その場合は、「最後のベクトルが、どのトークンの埋め込みに近いか」を測っているとも言えます。共有しないモデルもあります。&lt;/li&gt;
+  &lt;li&gt;使うのは最後の位置のベクトルだけです。&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h3 id=&quot;抽選&quot;&gt;抽選&lt;/h3&gt;
+
+&lt;p&gt;確率が最も高い語を、必ず選ぶとは限りません。確率に応じて抽選します。「温度」はsoftmaxの前に点数を割って、確率の偏りを強めたり弱めたりします。top-pは、確率の高い候補に絞って抽選します。同じ質問でも答えが毎回変わるのは、この抽選のためです。&lt;/p&gt;
+
+&lt;h2 id=&quot;繰り返し1語ずつ生成して終了まで&quot;&gt;繰り返し：1語ずつ生成して終了まで&lt;/h2&gt;
+
+&lt;p&gt;選ばれた語を末尾に足し、次の1語を同じ手順で作ることを、終了トークンが選ばれるまで繰り返します。&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;li&gt;「量子」が選ばれた（図6の仮の例では67%）。末尾に足す。&lt;/li&gt;
+  &lt;li&gt;新しい位置の1つだけを計算する。過去の位置のK・Vは、保存したキャッシュから使う。&lt;/li&gt;
+  &lt;li&gt;次の語を選ぶ。例：力学（58%）→ は → 、→ …&lt;/li&gt;
+  &lt;li&gt;モデルが、終了を示す特別なトークンを選んだら止まる（長さの上限でも止まる）。&lt;/li&gt;
+  &lt;li&gt;選ばれたトークンを文字に戻し、順に画面に表示する。&lt;/li&gt;
+&lt;/ol&gt;
+
+&lt;h3 id=&quot;kvキャッシュとプレフィルデコード&quot;&gt;KVキャッシュとプレフィル・デコード&lt;/h3&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;プレフィル：質問全体を読む段階です。全位置を並列に計算し、各層のK・Vを保存します。&lt;/li&gt;
+  &lt;li&gt;デコード：回答を作る段階です。新しい1トークンだけを計算し、過去のK・Vはキャッシュを使います。1語ずつ順番になります。&lt;/li&gt;
+  &lt;li&gt;キャッシュがないと、1語生成するたびに、前の位置のK・Vを全部作り直すことになります。キャッシュを使っても、新しい位置が、見える全位置と注意を計算する点は変わりません。&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h3 id=&quot;なぜ並列なのに前の語のkvを使うのか&quot;&gt;なぜ並列なのに、前の語のK・Vを使うのか&lt;/h3&gt;
+
+&lt;p&gt;「並列に計算する」ことと、「前の語のK・Vを使う」ことは、別々の話です。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;並列：質問を読む段階（プレフィル）では、全位置を同時に計算できます。位置どうしの計算が、互いの結果を待たないからです。&lt;/li&gt;
+  &lt;li&gt;K・Vを使う理由：注意は、各位置が前の位置を見て情報を集める処理だからです。並列かどうかに関係なく、見る相手のK・Vが材料として必要です。&lt;/li&gt;
+  &lt;li&gt;キャッシュが効く理由：回答を作る段階（デコード）では、毎回、末尾に1語だけ増えます。前の位置は後ろを見ないので（遮罩）、後ろに新しい語が来ても、前の位置のK・Vは変わりません。同じ値を毎回作り直すのは無駄なので、保存して使い回します。&lt;/li&gt;
+  &lt;li&gt;保存するのはK・Vだけです。過去のQは、その位置の注意を計算するためのもので、あとの位置では使わないので捨てます。&lt;/li&gt;
+  &lt;li&gt;キャッシュは層ごとに持ちます。文脈が長いほど、メモリを使います。&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;&lt;img src=&quot;/blog/assets/img/llm-walkthrough-fig7-kvcache.svg&quot; alt=&quot;KVキャッシュ：ステップ1で5位置分を計算して保存し、ステップ2・3は新しい1位置だけを計算する&quot; /&gt;&lt;/p&gt;
+
+&lt;p&gt;図7：ステップ1で5位置のK・Vを同時に計算して保存します。ステップ2以降は、新しい1位置だけを計算し、その位置が保存済みのK・Vをすべて見ます。&lt;/p&gt;
+
+&lt;h2 id=&quot;関連する疑問&quot;&gt;関連する疑問&lt;/h2&gt;
+
+&lt;p&gt;仕組みに関するよくある疑問と、その答えです。この節の数字や研究名は、記憶に基づく目安で、出典を確認したものではありません。&lt;/p&gt;
+
+&lt;h3 id=&quot;再調査してで直ることが多いのはなぜか&quot;&gt;「再調査して」で直ることが多いのはなぜか&lt;/h3&gt;
+
+&lt;p&gt;2023年頃の、ツールを持たないChatGPTは、「本当ですか？」と聞かれても、「その問いの後には『はい』が続きやすい」という統計だけで「はい」と答えがちでした。検証の手段がなかったからです。幻覚は偶発的な不具合ではなく、次のトークンを予測するという仕組みから出てくる性質です。&lt;/p&gt;
+
+&lt;p&gt;今は、次の点が違います。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;外部ツール：検索や、検索した資料を渡して答えさせる方式（RAG）で、実際に裏を取れます。訂正の根拠は、モデルの記憶ではなく、外から取った情報です。&lt;/li&gt;
+  &lt;li&gt;生成より検証が易しい：最初の回答がコンテキストにあるので、矛盾を点検できます。推論モデルは、この点検を思考の途中で行います。&lt;/li&gt;
+  &lt;li&gt;学習方法の変化：当てずっぽうを奨励せず、「わからない」と言えることを評価する方向です。&lt;/li&gt;
+  &lt;li&gt;再生成：2回目は別の抽選になります。誤りが偶然なら、正答に寄ることがあります。&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;注意点があります。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;「ほとんどの場合」は条件付きです。ツールなしで、知識の薄い領域では、別のもっともらしい誤答が出るだけのことがあります。&lt;/li&gt;
+  &lt;li&gt;迎合：疑われると、正しかった回答を撤回するモデルもあります。&lt;/li&gt;
+  &lt;li&gt;「確認しました」と言うだけで、実際には確認していないことがあります。ツールの呼び出しや、出典URLの有無を見ます。&lt;/li&gt;
+  &lt;li&gt;実務では、「一次情報のURLを付けて再確認して」と頼み、そのURLを自分で開くのが安全です。&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h3 id=&quot;最近のaiで変わった点&quot;&gt;最近のAIで変わった点&lt;/h3&gt;
+
+&lt;p&gt;核（Transformer、次トークン予測、統計的パターン学習）は同じです。変わったのは、周りの仕組みと訓練です。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;推論モデル：回答の前に長い思考過程を生成し、検算や見直しをします。正解を機械的に判定できる問題（数学、コード）で強化学習する方法が広がりました。&lt;/li&gt;
+  &lt;li&gt;ツール使用とエージェント化：コード実行、検索、ファイル操作などを組み合わせ、複数ステップの作業を進めます。MCPのような、ツール接続の標準規格も整ってきました。&lt;/li&gt;
+  &lt;li&gt;マルチモーダルの統合：1つのモデルが、文章、画像、音声、動画を扱えます。&lt;/li&gt;
+  &lt;li&gt;長いコンテキスト：数十万〜100万トークン規模の入力を扱えるモデルがあります。&lt;/li&gt;
+  &lt;li&gt;不確かさの扱いと内部理解の研究：「わからない」と答える訓練が進みました。モデル内部に「この対象を知っているか」を判定する仕組みがあり、その誤作動で幻覚が起きることが示されています。&lt;/li&gt;
+  &lt;li&gt;攻撃面：画素を改変する対抗サンプルは残っています。実害が大きいのは、Webページやファイルに紛れた指示でツールを使うAIを操る、プロンプトインジェクションです。&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;幻覚はゼロになっていません。ツールなしで、知識が薄い領域の質問をすると、今でも自信満々の誤答が出ます。&lt;/p&gt;
+
+&lt;h3 id=&quot;100万トークンの文脈では全部と計算するのか&quot;&gt;100万トークンの文脈では、全部と計算するのか&lt;/h3&gt;
+
+&lt;p&gt;標準的な（全結合の）注意では、各トークンのQが、見える範囲の全トークンのKと点数を計算します。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;100万トークンのペア数は10の12乗です。遮罩があるので、実際はその約半分です。これをヘッドごと、層ごとに行います。&lt;/li&gt;
+  &lt;li&gt;計算量は入力長の2乗で増えます。128kから100万に伸ばすと、注意の計算は約60倍です。&lt;/li&gt;
+  &lt;li&gt;工夫の例：KVキャッシュ（生成時は新しい1トークンが過去N個と照合するだけ）、FlashAttention（結果は厳密で、メモリを節約。計算量は2乗のまま）、スパース注意とスライディングウィンドウ（一部の位置だけを見る方式）、GQA・MQA（KとVの共有）、線形注意や状態空間モデル（Mambaなど）との併用。&lt;/li&gt;
+  &lt;li&gt;商用モデルの方式は、多くが非公開です。純粋な全結合のままではコストが非現実的なので、何らかの最適化が入っていると考えるのが自然です。&lt;/li&gt;
+  &lt;li&gt;長く扱えることと、全体を同じ精度で使いこなせることは別です。中間部分の情報が使われにくい現象も報告されています。&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;h3 id=&quot;1回しか出ない事実は覚えられるか&quot;&gt;1回しか出ない事実は覚えられるか&lt;/h3&gt;
+
+&lt;p&gt;「東京はどこですか？　日本」が訓練データに1回だけあり、類似の質問もない場合、必ず「日本」と答えるとは限りません。むしろ、安定して答えられない可能性のほうが高いです。&lt;/p&gt;
+
+&lt;ul&gt;
+  &lt;li&gt;1回の更新で動くパラメータはわずかで、他の膨大な例による更新に埋もれます。&lt;/li&gt;
+  &lt;li&gt;出力は確率分布です。「日本」の確率が少し上がっても、他の候補が残ります。&lt;/li&gt;
+  &lt;li&gt;類似の質問がないと、一般化の手がかりもありません。&lt;/li&gt;
+  &lt;li&gt;理論研究（Kalai と Vempala らが知られています。私の記憶で、確認はしていません）では、学習データに1回しか現れない事実の割合が、幻覚率の下限になると示されています。&lt;/li&gt;
+  &lt;li&gt;例外：同じ例を何度も学習させる（エポックを重ねる、ファインチューニングで繰り返す）と、記憶される可能性が上がります。ただし、過学習で他の能力が落ちることがあります。&lt;/li&gt;
+  &lt;li&gt;現実の「東京 → 日本」は、このケースに当てはまりません。「東京は日本の首都」「東京都」など、同じ知識を支える文脈が大量にあるからです。頻度と文脈の多様さが、記憶の確かさを決めます。&lt;/li&gt;
+&lt;/ul&gt;
+</description><description>&lt;h2 id=&quot;全体像&quot;&gt;全体像&lt;/h2&gt;
+
+</description><pubDate>Sat, 24 Oct 2026 00:00:00 +0000</pubDate>
+        <link>https://avocado-planet.github.io/blog/llm-quantum-mechanics-walkthrough/</link>
+        <guid isPermaLink="true">https://avocado-planet.github.io/blog/llm-quantum-mechanics-walkthrough/</guid></item><item>
         <title>Claudeのプロンプト構造とキャッシュを理解する — 「静的を先、動的を後」がなぜ効くのか</title>
         <description>&lt;p&gt;MCPサーバーを一つ足しただけで、作業を始める前にトークンがごっそり消える。長いセッションが途中から急に遅く・高くなる。こうした現象の裏側には、プロンプトの「並び方」とキャッシュの関係がある。本記事では、プロンプトがどう組み立てられ、キャッシュが何をどこに保存し、なぜ順番が効くのかを、順を追って分かりやすく説明する。&lt;/p&gt;
 
@@ -2664,356 +3275,5 @@ client &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; OpenAI&lt;span class=&quot
 
 </description><pubDate>Wed, 29 Apr 2026 00:00:00 +0000</pubDate>
         <link>https://avocado-planet.github.io/blog/local-llm-guide/</link>
-        <guid isPermaLink="true">https://avocado-planet.github.io/blog/local-llm-guide/</guid></item><item>
-        <title>MCPの仕組みを理解する：SSE・Stdio通信からLLMとのデータフローまで</title>
-        <description>&lt;h2 id=&quot;mcpとは&quot;&gt;MCPとは&lt;/h2&gt;
-
-&lt;p&gt;MCP（Model Context Protocol）は、LLMエージェントが外部ツール（関数・APIなど）を呼び出すための通信プロトコルです。LangChainやClaude Desktopなどのクライアントが、MCPサーバーに接続してツールを取得・実行します。&lt;/p&gt;
-
-&lt;hr /&gt;
-
-&lt;h2 id=&quot;通信方式sseとstdio&quot;&gt;通信方式：SSEとStdio&lt;/h2&gt;
-
-&lt;p&gt;MCPには主に2つのトランスポートモードがあります。&lt;/p&gt;
-
-&lt;h3 id=&quot;sseserver-sent-events&quot;&gt;SSE（Server-Sent Events）&lt;/h3&gt;
-
-&lt;p&gt;HTTPベースの通信方式。クライアントが1回だけ接続すると、サーバーが好きなタイミングで何度もデータを送り続けられます。&lt;/p&gt;
-
-&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;c1&quot;&gt;# SSEモードで起動
-&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;mcp&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;run&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;transport&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;sse&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
-
-&lt;span class=&quot;c1&quot;&gt;# または uvicorn で細かく制御
-&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;uvicorn&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;run&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;mcp&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;sse_app&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(),&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;host&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;0.0.0.0&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;port&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;mi&quot;&gt;8001&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
-
-&lt;table&gt;
-  &lt;thead&gt;
-    &lt;tr&gt;
-      &lt;th&gt;項目&lt;/th&gt;
-      &lt;th&gt;内容&lt;/th&gt;
-    &lt;/tr&gt;
-  &lt;/thead&gt;
-  &lt;tbody&gt;
-    &lt;tr&gt;
-      &lt;td&gt;通信手段&lt;/td&gt;
-      &lt;td&gt;HTTP（&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;text/event-stream&lt;/code&gt;）&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;接続&lt;/td&gt;
-      &lt;td&gt;1回のリクエストで維持&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;用途&lt;/td&gt;
-      &lt;td&gt;ネットワーク越しの接続、Colab環境&lt;/td&gt;
-    &lt;/tr&gt;
-  &lt;/tbody&gt;
-&lt;/table&gt;
-
-&lt;p&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;mcp.run()&lt;/code&gt; はMCPが内部でuvicornを起動するシンプルな方法。&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;uvicorn.run(mcp.sse_app())&lt;/code&gt; はホスト・ポートを自由に指定でき、既存のFastAPIアプリへの組み込みも可能です。&lt;/p&gt;
-
-&lt;p&gt;Google Colabでは &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;stdio&lt;/code&gt; モードが &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;sys.stdin.fileno()&lt;/code&gt; エラーを起こすため、SSEモードが回避策として使われます。&lt;/p&gt;
-
-&lt;hr /&gt;
-
-&lt;h3 id=&quot;stdio標準入出力&quot;&gt;Stdio（標準入出力）&lt;/h3&gt;
-
-&lt;p&gt;OSのパイプ機能でプロセスを直結する方式。HTTPを一切使いません。&lt;/p&gt;
-
-&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;n&quot;&gt;math_proc&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;subprocess&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;Popen&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;
-    &lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;python&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;/tmp/math_server.py&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;],&lt;/span&gt;
-    &lt;span class=&quot;n&quot;&gt;stdout&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;subprocess&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;PIPE&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
-    &lt;span class=&quot;n&quot;&gt;stderr&lt;/span&gt;&lt;span class=&quot;o&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;subprocess&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;PIPE&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;
-&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
-
-&lt;p&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;subprocess.Popen&lt;/code&gt; は起動したら即座に次の行へ進む（非同期）ため、サーバーを別プロセスで動かしながらクライアントコードを続けられます。&lt;/p&gt;
-
-&lt;p&gt;&lt;strong&gt;プロセス構造：OSのパイプで2プロセスを直結&lt;/strong&gt;&lt;/p&gt;
-
-&lt;svg width=&quot;100%&quot; viewBox=&quot;0 0 680 220&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot;&gt;
-  &lt;defs&gt;&lt;marker id=&quot;arr1&quot; viewBox=&quot;0 0 10 10&quot; refX=&quot;8&quot; refY=&quot;5&quot; markerWidth=&quot;6&quot; markerHeight=&quot;6&quot; orient=&quot;auto-start-reverse&quot;&gt;&lt;path d=&quot;M2 1L8 5L2 9&quot; fill=&quot;none&quot; stroke=&quot;context-stroke&quot; stroke-width=&quot;1.5&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot; /&gt;&lt;/marker&gt;&lt;/defs&gt;
-  &lt;rect x=&quot;30&quot; y=&quot;20&quot; width=&quot;620&quot; height=&quot;180&quot; rx=&quot;16&quot; fill=&quot;#f1efe8&quot; stroke=&quot;#888780&quot; stroke-width=&quot;0.5&quot; /&gt;
-  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;13&quot; font-weight=&quot;500&quot; x=&quot;340&quot; y=&quot;46&quot; text-anchor=&quot;middle&quot; fill=&quot;#444441&quot;&gt;OS（同一マシン）&lt;/text&gt;
-  &lt;rect x=&quot;60&quot; y=&quot;66&quot; width=&quot;190&quot; height=&quot;70&quot; rx=&quot;8&quot; fill=&quot;#eeedfe&quot; stroke=&quot;#534ab7&quot; stroke-width=&quot;0.5&quot; /&gt;
-  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;13&quot; font-weight=&quot;500&quot; x=&quot;155&quot; y=&quot;97&quot; text-anchor=&quot;middle&quot; fill=&quot;#3c3489&quot;&gt;クライアント&lt;/text&gt;
-  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;11&quot; x=&quot;155&quot; y=&quot;116&quot; text-anchor=&quot;middle&quot; fill=&quot;#534ab7&quot;&gt;LangChain / Claude&lt;/text&gt;
-  &lt;rect x=&quot;430&quot; y=&quot;66&quot; width=&quot;190&quot; height=&quot;70&quot; rx=&quot;8&quot; fill=&quot;#e1f5ee&quot; stroke=&quot;#0f6e56&quot; stroke-width=&quot;0.5&quot; /&gt;
-  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;13&quot; font-weight=&quot;500&quot; x=&quot;525&quot; y=&quot;97&quot; text-anchor=&quot;middle&quot; fill=&quot;#085041&quot;&gt;サーバー&lt;/text&gt;
-  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;11&quot; x=&quot;525&quot; y=&quot;116&quot; text-anchor=&quot;middle&quot; fill=&quot;#0f6e56&quot;&gt;math_server.py&lt;/text&gt;
-  &lt;line x1=&quot;252&quot; y1=&quot;92&quot; x2=&quot;428&quot; y2=&quot;92&quot; stroke=&quot;#1D9E75&quot; stroke-width=&quot;1.5&quot; marker-end=&quot;url(#arr1)&quot; /&gt;
-  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;11&quot; x=&quot;340&quot; y=&quot;85&quot; text-anchor=&quot;middle&quot; fill=&quot;#085041&quot;&gt;stdin（書き込み）&lt;/text&gt;
-  &lt;line x1=&quot;428&quot; y1=&quot;112&quot; x2=&quot;252&quot; y2=&quot;112&quot; stroke=&quot;#534ab7&quot; stroke-width=&quot;1.5&quot; marker-end=&quot;url(#arr1)&quot; /&gt;
-  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;11&quot; x=&quot;340&quot; y=&quot;130&quot; text-anchor=&quot;middle&quot; fill=&quot;#3c3489&quot;&gt;stdout（読み取り）&lt;/text&gt;
-  &lt;rect x=&quot;60&quot; y=&quot;155&quot; width=&quot;560&quot; height=&quot;32&quot; rx=&quot;6&quot; fill=&quot;#ffffff&quot; stroke=&quot;#b4b2a9&quot; stroke-width=&quot;0.5&quot; /&gt;
-  &lt;text font-family=&quot;monospace&quot; font-size=&quot;11&quot; x=&quot;340&quot; y=&quot;175&quot; text-anchor=&quot;middle&quot; fill=&quot;#444441&quot;&gt;subprocess.Popen([&quot;python&quot;, &quot;math_server.py&quot;], stdout=PIPE, stderr=PIPE)&lt;/text&gt;
-&lt;/svg&gt;
-
-&lt;p&gt;プロトコルは &lt;strong&gt;JSON-RPC 2.0&lt;/strong&gt;。1行1メッセージ（改行区切り）でパイプを流れます。&lt;/p&gt;
-
-&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;クライアント → サーバーのstdinに書き込む
-サーバー     → stdoutに書き込む → クライアントが読む
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
-
-&lt;p&gt;&lt;strong&gt;JSON-RPC通信の流れ（クライアント ↔ サーバー）&lt;/strong&gt;&lt;/p&gt;
-
-&lt;svg width=&quot;100%&quot; viewBox=&quot;0 0 680 400&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot;&gt;
-  &lt;defs&gt;&lt;marker id=&quot;arr2&quot; viewBox=&quot;0 0 10 10&quot; refX=&quot;8&quot; refY=&quot;5&quot; markerWidth=&quot;6&quot; markerHeight=&quot;6&quot; orient=&quot;auto-start-reverse&quot;&gt;&lt;path d=&quot;M2 1L8 5L2 9&quot; fill=&quot;none&quot; stroke=&quot;context-stroke&quot; stroke-width=&quot;1.5&quot; stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot; /&gt;&lt;/marker&gt;&lt;/defs&gt;
-  &lt;rect x=&quot;30&quot; y=&quot;20&quot; width=&quot;130&quot; height=&quot;44&quot; rx=&quot;8&quot; fill=&quot;#eeedfe&quot; stroke=&quot;#534ab7&quot; stroke-width=&quot;0.5&quot; /&gt;
-  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;13&quot; font-weight=&quot;500&quot; x=&quot;95&quot; y=&quot;42&quot; text-anchor=&quot;middle&quot; fill=&quot;#3c3489&quot;&gt;クライアント&lt;/text&gt;
-  &lt;rect x=&quot;520&quot; y=&quot;20&quot; width=&quot;130&quot; height=&quot;44&quot; rx=&quot;8&quot; fill=&quot;#e1f5ee&quot; stroke=&quot;#0f6e56&quot; stroke-width=&quot;0.5&quot; /&gt;
-  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;13&quot; font-weight=&quot;500&quot; x=&quot;585&quot; y=&quot;42&quot; text-anchor=&quot;middle&quot; fill=&quot;#085041&quot;&gt;サーバー&lt;/text&gt;
-  &lt;line x1=&quot;95&quot; y1=&quot;64&quot; x2=&quot;95&quot; y2=&quot;380&quot; stroke=&quot;#b4b2a9&quot; stroke-width=&quot;1.5&quot; /&gt;
-  &lt;line x1=&quot;585&quot; y1=&quot;64&quot; x2=&quot;585&quot; y2=&quot;380&quot; stroke=&quot;#b4b2a9&quot; stroke-width=&quot;1.5&quot; /&gt;
-  &lt;line x1=&quot;97&quot; y1=&quot;100&quot; x2=&quot;583&quot; y2=&quot;100&quot; stroke=&quot;#1D9E75&quot; stroke-width=&quot;1.5&quot; marker-end=&quot;url(#arr2)&quot; /&gt;
-  &lt;rect x=&quot;170&quot; y=&quot;80&quot; width=&quot;316&quot; height=&quot;30&quot; rx=&quot;6&quot; fill=&quot;#eaf3de&quot; stroke=&quot;#3b6d11&quot; stroke-width=&quot;0.5&quot; /&gt;
-  &lt;text font-family=&quot;monospace&quot; font-size=&quot;11&quot; x=&quot;328&quot; y=&quot;99&quot; text-anchor=&quot;middle&quot; fill=&quot;#27500a&quot;&gt;{&quot;method&quot;:&quot;initialize&quot;,&quot;id&quot;:1}&lt;/text&gt;
-  &lt;line x1=&quot;583&quot; y1=&quot;148&quot; x2=&quot;97&quot; y2=&quot;148&quot; stroke=&quot;#534ab7&quot; stroke-width=&quot;1.5&quot; marker-end=&quot;url(#arr2)&quot; /&gt;
-  &lt;rect x=&quot;170&quot; y=&quot;128&quot; width=&quot;316&quot; height=&quot;30&quot; rx=&quot;6&quot; fill=&quot;#eeedfe&quot; stroke=&quot;#534ab7&quot; stroke-width=&quot;0.5&quot; /&gt;
-  &lt;text font-family=&quot;monospace&quot; font-size=&quot;11&quot; x=&quot;328&quot; y=&quot;147&quot; text-anchor=&quot;middle&quot; fill=&quot;#3c3489&quot;&gt;{&quot;result&quot;:{&quot;capabilities&quot;:{...}},&quot;id&quot;:1}&lt;/text&gt;
-  &lt;line x1=&quot;97&quot; y1=&quot;196&quot; x2=&quot;583&quot; y2=&quot;196&quot; stroke=&quot;#1D9E75&quot; stroke-width=&quot;1.5&quot; marker-end=&quot;url(#arr2)&quot; /&gt;
-  &lt;rect x=&quot;196&quot; y=&quot;176&quot; width=&quot;264&quot; height=&quot;30&quot; rx=&quot;6&quot; fill=&quot;#eaf3de&quot; stroke=&quot;#3b6d11&quot; stroke-width=&quot;0.5&quot; /&gt;
-  &lt;text font-family=&quot;monospace&quot; font-size=&quot;11&quot; x=&quot;328&quot; y=&quot;195&quot; text-anchor=&quot;middle&quot; fill=&quot;#27500a&quot;&gt;{&quot;method&quot;:&quot;tools/list&quot;,&quot;id&quot;:2}&lt;/text&gt;
-  &lt;line x1=&quot;583&quot; y1=&quot;244&quot; x2=&quot;97&quot; y2=&quot;244&quot; stroke=&quot;#534ab7&quot; stroke-width=&quot;1.5&quot; marker-end=&quot;url(#arr2)&quot; /&gt;
-  &lt;rect x=&quot;148&quot; y=&quot;224&quot; width=&quot;364&quot; height=&quot;30&quot; rx=&quot;6&quot; fill=&quot;#eeedfe&quot; stroke=&quot;#534ab7&quot; stroke-width=&quot;0.5&quot; /&gt;
-  &lt;text font-family=&quot;monospace&quot; font-size=&quot;11&quot; x=&quot;328&quot; y=&quot;243&quot; text-anchor=&quot;middle&quot; fill=&quot;#3c3489&quot;&gt;{&quot;result&quot;:{&quot;tools&quot;:[{&quot;name&quot;:&quot;add&quot;,...}]},&quot;id&quot;:2}&lt;/text&gt;
-  &lt;line x1=&quot;97&quot; y1=&quot;292&quot; x2=&quot;583&quot; y2=&quot;292&quot; stroke=&quot;#1D9E75&quot; stroke-width=&quot;1.5&quot; marker-end=&quot;url(#arr2)&quot; /&gt;
-  &lt;rect x=&quot;100&quot; y=&quot;272&quot; width=&quot;460&quot; height=&quot;30&quot; rx=&quot;6&quot; fill=&quot;#eaf3de&quot; stroke=&quot;#3b6d11&quot; stroke-width=&quot;0.5&quot; /&gt;
-  &lt;text font-family=&quot;monospace&quot; font-size=&quot;11&quot; x=&quot;328&quot; y=&quot;291&quot; text-anchor=&quot;middle&quot; fill=&quot;#27500a&quot;&gt;{&quot;method&quot;:&quot;tools/call&quot;,&quot;params&quot;:{&quot;name&quot;:&quot;add&quot;,&quot;arguments&quot;:{&quot;a&quot;:3,&quot;b&quot;:5}},&quot;id&quot;:3}&lt;/text&gt;
-  &lt;line x1=&quot;583&quot; y1=&quot;340&quot; x2=&quot;97&quot; y2=&quot;340&quot; stroke=&quot;#534ab7&quot; stroke-width=&quot;1.5&quot; marker-end=&quot;url(#arr2)&quot; /&gt;
-  &lt;rect x=&quot;170&quot; y=&quot;320&quot; width=&quot;316&quot; height=&quot;30&quot; rx=&quot;6&quot; fill=&quot;#eeedfe&quot; stroke=&quot;#534ab7&quot; stroke-width=&quot;0.5&quot; /&gt;
-  &lt;text font-family=&quot;monospace&quot; font-size=&quot;11&quot; x=&quot;328&quot; y=&quot;339&quot; text-anchor=&quot;middle&quot; fill=&quot;#3c3489&quot;&gt;{&quot;result&quot;:{&quot;content&quot;:[{&quot;text&quot;:&quot;8&quot;}]},&quot;id&quot;:3}&lt;/text&gt;
-  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;11&quot; x=&quot;30&quot; y=&quot;104&quot; fill=&quot;#639922&quot;&gt;①&lt;/text&gt;
-  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;11&quot; x=&quot;30&quot; y=&quot;152&quot; fill=&quot;#534ab7&quot;&gt;②&lt;/text&gt;
-  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;11&quot; x=&quot;30&quot; y=&quot;200&quot; fill=&quot;#639922&quot;&gt;③&lt;/text&gt;
-  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;11&quot; x=&quot;30&quot; y=&quot;248&quot; fill=&quot;#534ab7&quot;&gt;④&lt;/text&gt;
-  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;11&quot; x=&quot;30&quot; y=&quot;296&quot; fill=&quot;#639922&quot;&gt;⑤&lt;/text&gt;
-  &lt;text font-family=&quot;sans-serif&quot; font-size=&quot;11&quot; x=&quot;30&quot; y=&quot;344&quot; fill=&quot;#534ab7&quot;&gt;⑥&lt;/text&gt;
-&lt;/svg&gt;
-
-&lt;p&gt;通信の流れ：&lt;/p&gt;
-
-&lt;table&gt;
-  &lt;thead&gt;
-    &lt;tr&gt;
-      &lt;th&gt;#&lt;/th&gt;
-      &lt;th&gt;方向&lt;/th&gt;
-      &lt;th&gt;内容&lt;/th&gt;
-    &lt;/tr&gt;
-  &lt;/thead&gt;
-  &lt;tbody&gt;
-    &lt;tr&gt;
-      &lt;td&gt;①&lt;/td&gt;
-      &lt;td&gt;→&lt;/td&gt;
-      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;initialize&lt;/code&gt;：接続確立の握手&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;②&lt;/td&gt;
-      &lt;td&gt;←&lt;/td&gt;
-      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;capabilities&lt;/code&gt;：サーバーの機能を返す&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;③&lt;/td&gt;
-      &lt;td&gt;→&lt;/td&gt;
-      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tools/list&lt;/code&gt;：ツール一覧を要求&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;④&lt;/td&gt;
-      &lt;td&gt;←&lt;/td&gt;
-      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tools&lt;/code&gt;：&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;add&lt;/code&gt;, &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;multiply&lt;/code&gt; などのリスト&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;⑤&lt;/td&gt;
-      &lt;td&gt;→&lt;/td&gt;
-      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;tools/call&lt;/code&gt;：ツールを引数付きで実行&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;⑥&lt;/td&gt;
-      &lt;td&gt;←&lt;/td&gt;
-      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;content&lt;/code&gt;：実行結果を返す&lt;/td&gt;
-    &lt;/tr&gt;
-  &lt;/tbody&gt;
-&lt;/table&gt;
-
-&lt;table&gt;
-  &lt;thead&gt;
-    &lt;tr&gt;
-      &lt;th&gt; &lt;/th&gt;
-      &lt;th&gt;Stdio&lt;/th&gt;
-      &lt;th&gt;SSE&lt;/th&gt;
-    &lt;/tr&gt;
-  &lt;/thead&gt;
-  &lt;tbody&gt;
-    &lt;tr&gt;
-      &lt;td&gt;通信手段&lt;/td&gt;
-      &lt;td&gt;OSパイプ&lt;/td&gt;
-      &lt;td&gt;HTTP&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;動作場所&lt;/td&gt;
-      &lt;td&gt;同一マシン限定&lt;/td&gt;
-      &lt;td&gt;ネットワーク越しも可&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;速度&lt;/td&gt;
-      &lt;td&gt;速い&lt;/td&gt;
-      &lt;td&gt;やや遅い&lt;/td&gt;
-    &lt;/tr&gt;
-  &lt;/tbody&gt;
-&lt;/table&gt;
-
-&lt;hr /&gt;
-
-&lt;h2 id=&quot;llmとmcp間のデータフロー&quot;&gt;LLMとMCP間のデータフロー&lt;/h2&gt;
-
-&lt;h3 id=&quot;ツール定義の取得&quot;&gt;ツール定義の取得&lt;/h3&gt;
-
-&lt;p&gt;MCPクライアントが接続先サーバーに「どんなツールが使えるか？」を問い合わせるのが &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;get_tools()&lt;/code&gt; です。サーバーはツールの名前・説明・引数の型をJSON形式で返します。これをLLMに渡すことで、LLMは「どのツールをどう使えるか」を把握できるようになります。&lt;/p&gt;
-
-&lt;p&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;get_tools()&lt;/code&gt; はユーザーの入力を待たず、エージェント作成時に1回だけ実行されます。チャットが始まる前の「準備フェーズ」です。&lt;/p&gt;
-
-&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;c1&quot;&gt;# 1. MCPサーバーへの接続設定
-&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;client&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;MultiServerMCPClient&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;({&lt;/span&gt;
-    &lt;span class=&quot;s&quot;&gt;&quot;math&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;url&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;http://localhost:8000/sse&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;transport&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;s&quot;&gt;&quot;sse&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;
-&lt;span class=&quot;p&quot;&gt;})&lt;/span&gt;
-
-&lt;span class=&quot;c1&quot;&gt;# 2. サーバーに「使えるツール一覧をくれ」と問い合わせる
-&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;tools&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;await&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;client&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;get_tools&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;
-
-&lt;span class=&quot;c1&quot;&gt;# 3. LLMとツール定義を組み合わせてエージェントを作る
-&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;agent&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;create_agent&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;model&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;tools&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;)&lt;/span&gt;
-
-&lt;span class=&quot;c1&quot;&gt;# 4. ここで初めてユーザーのプロンプトを受け付ける
-&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;result&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;await&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;agent&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;ainvoke&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;({&lt;/span&gt;&lt;span class=&quot;s&quot;&gt;&quot;messages&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;p&quot;&gt;[...]})&lt;/span&gt;
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
-
-&lt;p&gt;LLMには以下のようなツール定義が渡ります。&lt;/p&gt;
-
-&lt;div class=&quot;language-json highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;p&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
-  &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
-    &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;name&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;add&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
-    &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;description&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;2つの数を足す&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;,&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
-    &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;parameters&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
-      &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;a&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;type&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;number&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;},&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
-      &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;b&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;nl&quot;&gt;&quot;type&quot;&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;s2&quot;&gt;&quot;number&quot;&lt;/span&gt;&lt;span class=&quot;w&quot;&gt; &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
-    &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
-  &lt;/span&gt;&lt;span class=&quot;p&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
-&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;]&lt;/span&gt;&lt;span class=&quot;w&quot;&gt;
-&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
-
-&lt;h3 id=&quot;ainvoke-呼び出し時&quot;&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;ainvoke()&lt;/code&gt; 呼び出し時&lt;/h3&gt;
-
-&lt;p&gt;ユーザーのプロンプトが入ると、LLMにはツール定義とプロンプトが&lt;strong&gt;同時に&lt;/strong&gt;送られます。&lt;/p&gt;
-
-&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;┌─ システム情報 ───────────────────────────┐
-│ 使えるツール：add(a,b) / multiply(a,b)  │  ← get_tools()の結果
-└─────────────────────────────────────────┘
-┌─ ユーザーメッセージ ─────────────────────┐
-│ &quot;(3 + 5) x 12 を計算して&quot;               │  ← ainvoke()の引数
-└─────────────────────────────────────────┘
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
-
-&lt;h3 id=&quot;ツール呼び出しの流れ&quot;&gt;ツール呼び出しの流れ&lt;/h3&gt;
-
-&lt;p&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;&quot;(3 + 5) x 12 を計算して&quot;&lt;/code&gt; に対してLLMが行う判断サイクル：&lt;/p&gt;
-
-&lt;div class=&quot;language-plaintext highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;Human      &quot;(3 + 5) x 12 を計算して&quot;
-AI         tool_call: add(a=3, b=5)
-Tool       &quot;8&quot;
-AI         tool_call: multiply(a=8, b=12)
-Tool       &quot;96&quot;
-AI         &quot;答えは 96 です&quot;   ← result[&apos;messages&apos;][-1]
-&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
-
-&lt;p&gt;LLMが判断していること：&lt;/p&gt;
-
-&lt;table&gt;
-  &lt;thead&gt;
-    &lt;tr&gt;
-      &lt;th&gt;判断&lt;/th&gt;
-      &lt;th&gt;内容&lt;/th&gt;
-    &lt;/tr&gt;
-  &lt;/thead&gt;
-  &lt;tbody&gt;
-    &lt;tr&gt;
-      &lt;td&gt;ツール選択&lt;/td&gt;
-      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;add&lt;/code&gt; と &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;multiply&lt;/code&gt; のどちらを使うか&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;引数の組み立て&lt;/td&gt;
-      &lt;td&gt;前のツール結果を次の引数に使う&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;順序の決定&lt;/td&gt;
-      &lt;td&gt;足し算 → 掛け算の順番&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;終了判断&lt;/td&gt;
-      &lt;td&gt;これ以上ツールは不要、回答を生成する&lt;/td&gt;
-    &lt;/tr&gt;
-  &lt;/tbody&gt;
-&lt;/table&gt;
-
-&lt;p&gt;この一連の判断サイクルが &lt;strong&gt;ReAct&lt;/strong&gt;（Reasoning + Acting）の正体です。&lt;/p&gt;
-
-&lt;hr /&gt;
-
-&lt;h2 id=&quot;プロセスのライフサイクル&quot;&gt;プロセスのライフサイクル&lt;/h2&gt;
-
-&lt;p&gt;LangChainとClaude.aiでMCPの寿命は異なります。&lt;/p&gt;
-
-&lt;h3 id=&quot;langchain&quot;&gt;LangChain&lt;/h3&gt;
-
-&lt;div class=&quot;language-python highlighter-rouge&quot;&gt;&lt;div class=&quot;highlight&quot;&gt;&lt;pre class=&quot;highlight&quot;&gt;&lt;code&gt;&lt;span class=&quot;n&quot;&gt;client&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;MultiServerMCPClient&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;({...})&lt;/span&gt;
-&lt;span class=&quot;n&quot;&gt;tools&lt;/span&gt; &lt;span class=&quot;o&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;k&quot;&gt;await&lt;/span&gt; &lt;span class=&quot;n&quot;&gt;client&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;n&quot;&gt;get_tools&lt;/span&gt;&lt;span class=&quot;p&quot;&gt;()&lt;/span&gt;   &lt;span class=&quot;c1&quot;&gt;# ← ここで接続
-# ...
-# 関数が終わると client はGCに回収される → 接続切れ
-&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;&lt;/div&gt;
-
-&lt;p&gt;ただし &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;subprocess.Popen&lt;/code&gt; で起動したサーバープロセスは独立して動き続けます。明示的に &lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;math_proc.terminate()&lt;/code&gt; を呼ぶまで生存します。&lt;/p&gt;
-
-&lt;h3 id=&quot;claudeai&quot;&gt;claude.ai&lt;/h3&gt;
-
-&lt;p&gt;セッション単位で接続が維持されます。タブを閉じる・セッション終了でMCP接続も切れます。MCPサーバー自体はアプリ終了まで生存するのが一般的な設計です。&lt;/p&gt;
-
-&lt;table&gt;
-  &lt;thead&gt;
-    &lt;tr&gt;
-      &lt;th&gt; &lt;/th&gt;
-      &lt;th&gt;MCP接続（クライアント側）&lt;/th&gt;
-      &lt;th&gt;MCPサーバープロセス&lt;/th&gt;
-    &lt;/tr&gt;
-  &lt;/thead&gt;
-  &lt;tbody&gt;
-    &lt;tr&gt;
-      &lt;td&gt;LangChain&lt;/td&gt;
-      &lt;td&gt;関数の実行中のみ&lt;/td&gt;
-      &lt;td&gt;&lt;code class=&quot;language-plaintext highlighter-rouge&quot;&gt;terminate()&lt;/code&gt; するまで生存&lt;/td&gt;
-    &lt;/tr&gt;
-    &lt;tr&gt;
-      &lt;td&gt;claude.ai&lt;/td&gt;
-      &lt;td&gt;セッション中は維持&lt;/td&gt;
-      &lt;td&gt;アプリ終了まで生存&lt;/td&gt;
-    &lt;/tr&gt;
-  &lt;/tbody&gt;
-&lt;/table&gt;
-
-&lt;p&gt;「接続」と「プロセス」は別物として管理する必要があります。&lt;/p&gt;
-
-&lt;hr /&gt;
-
-&lt;h2 id=&quot;まとめ&quot;&gt;まとめ&lt;/h2&gt;
-
-&lt;ul&gt;
-  &lt;li&gt;&lt;strong&gt;SSE&lt;/strong&gt;：HTTPベース、ネットワーク越しに使える、Colab向き&lt;/li&gt;
-  &lt;li&gt;&lt;strong&gt;Stdio&lt;/strong&gt;：パイプベース、ローカル限定、高速、Claude Desktop向き&lt;/li&gt;
-  &lt;li&gt;&lt;strong&gt;ツール定義&lt;/strong&gt;はセッション開始時に1回取得してLLMに渡す&lt;/li&gt;
-  &lt;li&gt;&lt;strong&gt;ReAct&lt;/strong&gt;ループでLLMがツールを選択・実行・結果を次の引数に使う&lt;/li&gt;
-  &lt;li&gt;&lt;strong&gt;プロセスと接続&lt;/strong&gt;のライフサイクルは独立して管理する&lt;/li&gt;
-&lt;/ul&gt;
-</description><description>&lt;h2 id=&quot;mcpとは&quot;&gt;MCPとは&lt;/h2&gt;
-
-</description><pubDate>Tue, 28 Apr 2026 00:00:00 +0000</pubDate>
-        <link>https://avocado-planet.github.io/blog/mcp-stdio-sse-dataflow/</link>
-        <guid isPermaLink="true">https://avocado-planet.github.io/blog/mcp-stdio-sse-dataflow/</guid></item></channel>
+        <guid isPermaLink="true">https://avocado-planet.github.io/blog/local-llm-guide/</guid></item></channel>
 </rss>
