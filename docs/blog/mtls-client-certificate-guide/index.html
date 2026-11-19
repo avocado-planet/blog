@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<!--[if lt IE 7]><html class="no-js lt-ie9 lt-ie8 lt-ie7"><![endif]-->
+<!--[if IE 7]><html class="no-js lt-ie9 lt-ie8" <![endif]-->
+<!--[if IE 8]><html class="no-js lt-ie9" <![endif]-->
+<!--[if gt IE 8]><!--> <html class="no-js"> <!--<![endif]--><head>
+	<meta charset="utf-8" />
+	<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<meta name="description" content="" />
+	<title>クライアント証明書認証(mTLS)をやさしく理解する:仕組み・CA検証・運用・.p12・CSRまで | Avocado Planet</title>
+
+	<!-- Open Graph Meta -->
+	<meta content="Avocado Planet" property="og:site_name" /><meta content="クライアント証明書認証(mTLS)をやさしく理解する:仕組み・CA検証・運用・.p12・CSRまで" property="og:title" /><meta content="article" property="og:type" /><meta content="特定のサイトで求められるクライアント証明書と秘密鍵。mTLSの通信の流れ、CAによる検証、証明書の発行運用、.p12とCSRの意味を図解で整理します。" property="og:description" /><meta content="https://avocado-planet.github.io/blog/blog/mtls-client-certificate-guide/" property="og:url" /><meta
+		content="2026-11-19T00:00:00+00:00"
+		property="article:published_time"
+	/>
+	<meta content="https://avocado-planet.github.io/blog/about/" property="article:author" /><meta
+		content="https://avocado-planet.github.io/blog/assets/img/touring.jpg"
+		property="og:image"
+	/><!-- Twitter Cards -->
+	<meta name="twitter:card" content="summary" />
+	<meta name="twitter:site" content="@" />
+	<meta name="twitter:creator" content="@" /><meta name="twitter:title" content="クライアント証明書認証(mTLS)をやさしく理解する:仕組み・CA検証・運用・.p12・CSRまで" /><meta name="twitter:url" content="https://avocado-planet.github.io/blog/blog/mtls-client-certificate-guide/" /><meta name="twitter:description" content="特定のサイトで求められるクライアント証明書と秘密鍵。mTLSの通信の流れ、CAによる検証、証明書の発行運用、.p12とCSRの意味を図解で整理します。" /><meta
+		name="twitter:image:src"
+		content="https://avocado-planet.github.io/blog/assets/img/touring.jpg"
+	/><!-- Favicon -->
+	<link rel="icon" type="image/x-icon" href=""/>
+
+	<!-- Come and get me RSS readers -->
+	<link rel="alternate" type="application/rss+xml" title="Avocado Planet"
+	href="https://avocado-planet.github.io/blog/feed.xml" />
+
+	<!-- Stylesheet -->
+	<link rel="stylesheet" href="/blog/assets/css/style.css" />
+
+	<!-- Canonical URL -->
+	<link
+		rel="canonical"
+		href="https://avocado-planet.github.io/blog/blog/mtls-client-certificate-guide/"
+	/></head>
+<body> <div class="header ">
+     <div class="container">
+         <h1 class="logo"><a href="/blog/">Avocado Planet</a></h1>
+         <nav class="nav-collapse">
+             <ul class="noList"><li class="elementfirst">
+                     <a href="/blog/index.html">Home</a>
+                 </li><li class="elementlast">
+                     <a href="/blog/about">About</a>
+                 </li><li> <a href="https://github.com/avocado-planet/" target="_blank">GitHub</a></li>
+             </ul>
+         </nav>
+     </div>
+ </div><!-- end .header -->
+<div class="content">
+      <div class="container">
+         <article class="post"><header>
+    <h1 class="postTitle">クライアント証明書認証(mTLS)をやさしく理解する:仕組み・CA検証・運用・.p12・CSRまで</h1>
+    <p class="meta">November 19, 2026 | <span class="time">3</span> Minute Read</p>
+  </header>
+
+  <p>特定のサイトにアクセスすると、ブラウザが「クライアント証明書を選択してください」と求めてくることがあります。これは <strong>mTLS(相互TLS認証 / クライアント証明書認証)</strong> という仕組みです。この記事では、その仕組みを順番に整理します。</p>
+
+<h2 id="1-mtlsとは">1. mTLSとは</h2>
+
+<p>通常のHTTPSでは、<strong>サーバーだけ</strong>が証明書を提示し、クライアントがそれを検証します。mTLSでは、<strong>サーバーもクライアントを証明書で検証します</strong>。</p>
+
+<table>
+  <thead>
+    <tr>
+      <th> </th>
+      <th>通常のHTTPS</th>
+      <th>mTLS</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>サーバー証明書</td>
+      <td>必要</td>
+      <td>必要</td>
+    </tr>
+    <tr>
+      <td>クライアント証明書</td>
+      <td>不要</td>
+      <td><strong>必要</strong></td>
+    </tr>
+    <tr>
+      <td>本人確認</td>
+      <td>ID・パスワードなどで別途</td>
+      <td>証明書で通信の時点で確認</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>よくある用途は次のとおりです。</p>
+
+<ul>
+  <li>社内システム、VPN、ゼロトラスト型のプロキシ</li>
+  <li>金融・官公庁系のAPI</li>
+  <li>AWS API Gateway / ALB、OCI API Gateway のmTLS</li>
+  <li>サービス間通信(Istio などのサービスメッシュ)</li>
+</ul>
+
+<h3 id="秘密鍵を求められるの正体">「秘密鍵を求められる」の正体</h3>
+
+<p>秘密鍵そのものがサーバーに送られることはありません。<strong>秘密鍵は署名を作るために、クライアント側で使われるだけ</strong>です。ブラウザやOSで、鍵ストアの選択やパスワード入力のダイアログとして表示されるのは、このためです。</p>
+
+<h2 id="2-通信の流れ">2. 通信の流れ</h2>
+
+<p><img src="/blog/assets/img/mtls-client-certificate-guide-handshake.svg" alt="mTLSハンドシェイクの流れ" /></p>
+
+<ol>
+  <li>クライアントが <code class="language-plaintext highlighter-rouge">ClientHello</code> を送る。</li>
+  <li>サーバーが <code class="language-plaintext highlighter-rouge">ServerHello</code> と<strong>サーバー証明書</strong>を返す。クライアントは、これを自分のCAストアで検証する。</li>
+  <li>サーバーが <code class="language-plaintext highlighter-rouge">CertificateRequest</code> で、<strong>クライアント証明書の提示を要求</strong>する。</li>
+  <li>クライアントが<strong>クライアント証明書</strong>と、<strong>秘密鍵で作った署名</strong>(<code class="language-plaintext highlighter-rouge">CertificateVerify</code>)を送る。</li>
+  <li>サーバーが、CA検証と署名検証を行う。</li>
+  <li>双方が <code class="language-plaintext highlighter-rouge">Finished</code> を送り、鍵交換が完了する。</li>
+  <li>暗号化された通信が始まる。</li>
+</ol>
+
+<p>図の橙色が、通常のHTTPSにはないmTLS特有の手順です。</p>
+
+<h2 id="3-caによる検証の詳細">3. CAによる検証の詳細</h2>
+
+<p>サーバーは、クライアント証明書を次の観点で確認します。</p>
+
+<p><img src="/blog/assets/img/mtls-client-certificate-guide-chain.svg" alt="信頼の鎖とサーバーが行う確認" /></p>
+
+<p>サーバーは事前に、<strong>信頼するCAの証明書(信頼アンカー)</strong>を持っています。クライアントが提示した証明書から、そこまで鎖をたどれれば信頼します。</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>確認項目</th>
+      <th>内容</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>署名の検証</td>
+      <td>上位CAの公開鍵で署名を検証し、改ざんがないか確認</td>
+    </tr>
+    <tr>
+      <td>信頼の鎖</td>
+      <td>クライアント証明書、中間CA、ルートCAとたどれるか</td>
+    </tr>
+    <tr>
+      <td>有効期限</td>
+      <td><code class="language-plaintext highlighter-rouge">Not Before</code> と <code class="language-plaintext highlighter-rouge">Not After</code> の範囲内か(時刻ずれにも注意)</td>
+    </tr>
+    <tr>
+      <td>失効確認</td>
+      <td>CRL(失効リスト)またはOCSP(オンライン照会)で、無効化されていないか</td>
+    </tr>
+    <tr>
+      <td>用途</td>
+      <td>EKU(拡張鍵用途)に <code class="language-plaintext highlighter-rouge">clientAuth</code> が含まれるか</td>
+    </tr>
+    <tr>
+      <td>秘密鍵の所有</td>
+      <td><code class="language-plaintext highlighter-rouge">CertificateVerify</code> の署名を、証明書内の公開鍵で検証</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>証明書は公開情報なので、盗み見て提示するだけではなりすませません。<strong>秘密鍵の所有確認</strong>があるから、本人確認として成立します。</p>
+
+<h3 id="ca検証とアクセス許可は別">CA検証と、アクセス許可は別</h3>
+
+<p>CA検証は「本人確認」です。サーバー側では、さらに次のような絞り込み(認可)もできます。</p>
+
+<ul>
+  <li>Subject(CN など)や SAN が許可リストに含まれるか</li>
+  <li>特定の発行CA(中間CA)のみ許可する</li>
+  <li>証明書のフィンガープリントで個別に許可する</li>
+</ul>
+
+<h3 id="よくあるエラー">よくあるエラー</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>エラー</th>
+      <th>主な原因</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">400 No required SSL certificate was sent</code></td>
+      <td>クライアント証明書を提示していない</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">unknown ca</code></td>
+      <td>発行CAがサーバーの信頼ストアにない</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">unable to get local issuer certificate</code></td>
+      <td>中間CA証明書が欠けている</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">certificate has expired</code></td>
+      <td>有効期限切れ、または時刻ずれ</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">certificate revoked</code></td>
+      <td>失効済み</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">unsupported certificate purpose</code> / <code class="language-plaintext highlighter-rouge">bad certificate</code></td>
+      <td>EKU に <code class="language-plaintext highlighter-rouge">clientAuth</code> がない</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>手元で検証するコマンドです。</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># CAチェーンで検証</span>
+openssl verify <span class="nt">-CAfile</span> ca.crt <span class="nt">-untrusted</span> intermediate.crt client.crt
+
+<span class="c"># 有効期限・EKU・発行者の確認</span>
+openssl x509 <span class="nt">-in</span> client.crt <span class="nt">-noout</span> <span class="nt">-dates</span> <span class="nt">-issuer</span> <span class="nt">-subject</span> <span class="nt">-ext</span> extendedKeyUsage
+</code></pre></div></div>
+
+<h2 id="4-サーバー証明書とクライアント証明書のcaは同じ">4. サーバー証明書とクライアント証明書のCAは同じ?</h2>
+
+<p><strong>同じでも別でもよく、CAは特定のサーバーに属するものではありません。</strong> 検証する側が、それぞれ「どのCAを信頼するか」を決めます。</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>検証する側</th>
+      <th>検証する証明書</th>
+      <th>使う信頼ストア</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>クライアント</td>
+      <td>サーバー証明書</td>
+      <td>クライアント(ブラウザ・OS)が持つCA</td>
+    </tr>
+    <tr>
+      <td>サーバー</td>
+      <td>クライアント証明書</td>
+      <td>サーバーに登録したCA</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>信頼ストアが別々なので、2つの証明書のCAが異なっていても問題ありません。</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>パターン</th>
+      <th>サーバー証明書</th>
+      <th>クライアント証明書</th>
+      <th>主な用途</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>A. 別CA(最も一般的)</td>
+      <td>公的CA</td>
+      <td>自社の<strong>プライベートCA</strong></td>
+      <td>社内システム、API、ゼロトラスト</td>
+    </tr>
+    <tr>
+      <td>B. 同じプライベートCA</td>
+      <td>自社CA</td>
+      <td>同じ自社CA</td>
+      <td>閉じた環境、サービス間通信</td>
+    </tr>
+    <tr>
+      <td>C. 公的CA</td>
+      <td>公的CA</td>
+      <td>業務用の公的CA</td>
+      <td>電子申請など、官公庁・金融系</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>パターンAが多いのは、クライアント証明書は<strong>自社で発行・失効・期限を管理できる方が運用しやすい</strong>ためです。</p>
+
+<h3 id="caの秘密鍵はどこに置く">CAの秘密鍵はどこに置く?</h3>
+
+<ul>
+  <li>通常のWebサーバーには<strong>置きません</strong>。侵害されると、証明書を無制限に発行されてしまうためです。専用のCAサーバー、HSM、クラウドの管理サービスなどで厳重に保管します。</li>
+  <li>サーバーに登録するのは、<strong>CAの証明書(公開情報)だけ</strong>です。</li>
+  <li>クラウドの例: AWS の ACM Private CA、OCI の Certificates サービス。API Gateway / ALB のmTLS設定では、信頼するCA証明書(トラストストア)をアップロードします。</li>
+</ul>
+
+<h2 id="5-csrとは">5. CSRとは</h2>
+
+<p><strong>CSR(Certificate Signing Request:証明書署名要求)</strong>は、CAに「この公開鍵に対して証明書を発行してください」と依頼するためのファイルです。</p>
+
+<p>含まれるもの:</p>
+
+<ul>
+  <li>公開鍵</li>
+  <li>申請者の情報(Subject): CN、O、C など</li>
+  <li>申請者の秘密鍵による署名(鍵を持っていることの証明)</li>
+</ul>
+
+<p><strong>秘密鍵は含まれません。</strong> 秘密鍵は作成者の手元に残り、CAには渡りません。</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># 秘密鍵を作成</span>
+openssl genrsa <span class="nt">-out</span> client.key 2048
+
+<span class="c"># CSRを作成</span>
+openssl req <span class="nt">-new</span> <span class="nt">-key</span> client.key <span class="nt">-out</span> client.csr <span class="se">\</span>
+  <span class="nt">-subj</span> <span class="s2">"/C=JP/O=Example/CN=taro-client"</span>
+
+<span class="c"># CSRの中身を確認</span>
+openssl req <span class="nt">-in</span> client.csr <span class="nt">-noout</span> <span class="nt">-text</span>
+</code></pre></div></div>
+
+<h2 id="6-p12ファイルとは">6. .p12ファイルとは</h2>
+
+<p><code class="language-plaintext highlighter-rouge">.p12</code> は <strong>PKCS#12</strong> 形式のファイルです(<code class="language-plaintext highlighter-rouge">.pfx</code> も同じ形式)。<strong>証明書と秘密鍵を1つにまとめ、パスワードで暗号化したコンテナ</strong>で、配布やインポートに便利なため使われます。</p>
+
+<p>含まれるもの:</p>
+
+<ul>
+  <li>クライアント証明書</li>
+  <li>秘密鍵</li>
+  <li>中間CA、ルートCA証明書(含まれる場合があります)</li>
+</ul>
+
+<p>注意点:</p>
+
+<ul>
+  <li>秘密鍵が入っているため、<strong>パスワードと同じ経路(同じメールなど)で送らない</strong>でください。流出すると、なりすましが可能になります。</li>
+  <li>日常的には、ブラウザやOSの鍵ストアにインポートして使います。</li>
+</ul>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># 中身の確認</span>
+openssl pkcs12 <span class="nt">-info</span> <span class="nt">-in</span> client.p12
+
+<span class="c"># PEM形式に分離</span>
+openssl pkcs12 <span class="nt">-in</span> client.p12 <span class="nt">-clcerts</span> <span class="nt">-nokeys</span> <span class="nt">-out</span> client.crt
+openssl pkcs12 <span class="nt">-in</span> client.p12 <span class="nt">-nocerts</span> <span class="nt">-nodes</span> <span class="nt">-out</span> client.key
+
+<span class="c"># PEMから .p12 を作成</span>
+openssl pkcs12 <span class="nt">-export</span> <span class="nt">-inkey</span> client.key <span class="nt">-in</span> client.crt <span class="nt">-certfile</span> ca.crt <span class="nt">-out</span> client.p12
+</code></pre></div></div>
+
+<p>OpenSSL 3.x で古い <code class="language-plaintext highlighter-rouge">.p12</code> を開くと <code class="language-plaintext highlighter-rouge">unsupported</code> エラーが出ることがあります。その場合は <code class="language-plaintext highlighter-rouge">-legacy</code> オプションを付けてください。</p>
+
+<p>curl で接続する例です。</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>curl <span class="nt">--cert</span> client.crt <span class="nt">--key</span> client.key <span class="nt">--cacert</span> ca.crt https://example.com/
+
+<span class="c"># .p12 を使う場合</span>
+curl <span class="nt">--cert-type</span> P12 <span class="nt">--cert</span> client.p12:パスワード https://example.com/
+</code></pre></div></div>
+
+<h2 id="7-一般的な運用の流れ">7. 一般的な運用の流れ</h2>
+
+<p><img src="/blog/assets/img/mtls-client-certificate-guide-flow.svg" alt="クライアント証明書の運用フロー" /></p>
+
+<ol>
+  <li><strong>CAを用意する</strong>(社内CAまたは商用CA)。</li>
+  <li><strong>サーバーにクライアント認証を設定する</strong>(信頼するCA証明書を登録)。</li>
+  <li><strong>利用者が秘密鍵とCSRを作成する</strong>。秘密鍵は端末内に保管します。</li>
+  <li><strong>CAがCSRに署名して発行する</strong>(用途は <code class="language-plaintext highlighter-rouge">clientAuth</code>)。</li>
+  <li><strong>利用者が証明書を受け取り、導入する</strong>(<code class="language-plaintext highlighter-rouge">.p12</code> をインポート)。</li>
+  <li><strong>接続テストと運用</strong>(更新、失効の管理)。</li>
+</ol>
+
+<p>クライアント証明書の受け取り方には、二通りあります。</p>
+
+<ul>
+  <li><strong>A. 利用者がCSRを作る方式</strong>: 発行された <code class="language-plaintext highlighter-rouge">.crt</code> だけを受け取ります。鍵が外に出ないため、より安全です。</li>
+  <li><strong>B. 管理者が鍵ごと発行する方式</strong>: ポータルで <code class="language-plaintext highlighter-rouge">.p12</code> をダウンロードし、パスワードを別経路で通知します。社内システムで多い方式です。</li>
+</ul>
+
+<p>運用で決めておくこと:</p>
+
+<ul>
+  <li>有効期限(1〜2年が多い)と更新の手順</li>
+  <li>退職・紛失時の失効手続き</li>
+  <li>失効の確認方法(CRL / OCSP)</li>
+</ul>
+
+<h2 id="8-証明書は全員で共有してよい">8. 証明書は全員で共有してよい?</h2>
+
+<p><strong>共有は避けてください。</strong> 人(または端末)ごとに、別々のクライアント証明書を発行するのが一般的です。</p>
+
+<p>共有が好ましくない理由:</p>
+
+<ul>
+  <li><strong>誰がアクセスしたか分からない</strong>: ログのSubjectが全員同じになり、監査・追跡ができません。</li>
+  <li><strong>個別に失効できない</strong>: 1人が退職・紛失・流出すると、失効により全員が使えなくなります。</li>
+  <li><strong>秘密鍵の流出リスクが大きい</strong>: 配布経路が増え、漏れる可能性が高まります。</li>
+  <li><strong>証明書認証の利点が失われる</strong>: 本人確認としての意味がなくなります。</li>
+</ul>
+
+<table>
+  <thead>
+    <tr>
+      <th>単位</th>
+      <th>例</th>
+      <th>発行の方法</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>利用者ごと</td>
+      <td>社員ごとの証明書</td>
+      <td>入社時に発行、退職時に失効</td>
+    </tr>
+    <tr>
+      <td>端末ごと</td>
+      <td>PC・スマホごとの証明書</td>
+      <td>MDM(Intune、Jamf など)で自動配布</td>
+    </tr>
+    <tr>
+      <td>システムごと</td>
+      <td>バッチ、アプリ、マイクロサービス</td>
+      <td>システム単位で発行(人とは別)</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>端末ごとの発行では、MDMによる自動配布が増えています。利用者が手動で <code class="language-plaintext highlighter-rouge">.p12</code> を扱わずに済み、鍵の管理も安全になります。</p>
+
+<h2 id="まとめ">まとめ</h2>
+
+<ul>
+  <li>mTLSは、<strong>サーバーとクライアントが、互いに証明書で相手を確認する</strong>仕組みです。</li>
+  <li>秘密鍵は送られず、<strong>署名を作るために手元で使われる</strong>だけです。</li>
+  <li>サーバーは、<strong>信頼するCAの証明書</strong>を持ち、署名・鎖・期限・失効・用途・鍵の所有を確認します。</li>
+  <li>サーバー証明書とクライアント証明書のCAは、<strong>別でも同じでもよく</strong>、クライアント側は自社のプライベートCAで発行するのが一般的です。</li>
+  <li><strong>CSR</strong> は発行依頼書、<strong>.p12</strong> は証明書と秘密鍵をまとめたファイルです。</li>
+  <li>証明書は、<strong>人または端末ごとに発行する</strong>のが基本です。</li>
+</ul>
+
+
+  <!-- POST NAVIGATION -->
+  <footer class="postNav clearfix"><a class="prev" href="/blog/blog/llm-quantum-mechanics-walkthrough/"><span>&laquo;&nbsp;AIと会話するとき中で何が起きているか：「量子力学はなんですか？」が回答になるまで</span></a></footer>
+</article>
+      </div>
+   </div><!-- end .content --><div class="footer">
+	<div class="container">
+		<p class="copy">
+			&copy; 2026
+			<a href="http://brianmaierjr.com">Brian Maier Jr.</a> Powered by
+			<a href="http://jekyllrb.com">Jekyll</a>
+		</p>
+
+		<div class="footer-links">
+			<ul class="noList"><li>
+	<a href="https://www.linkedin.com/in/in/%E6%9C%8B-%E5%BC%B5-a77984179" target="_blank">
+	<svg
+		id="linkedin"
+		xmlns="http://www.w3.org/2000/svg"
+		width="96"
+		height="96"
+		viewBox="0 0 96 96"
+	>
+		<g fill="none">
+			<circle
+				class="outer-shape"
+				cx="48"
+				cy="48"
+				r="48"
+				fill="#000"
+			/>
+			<path
+				class="inner-shape"
+				fill="#FFF"
+				d="M10.2966071,46 L0.759821429,46 L0.759821429,15.2881537 L10.2966071,15.2881537 L10.2966071,46 Z M5.52308036,11.0987745 C2.47352679,11.0987745 1.17239551e-12,8.57282522 1.17239551e-12,5.52320357 C1.17239551e-12,2.47282245 2.47276734,-9.65449942e-13 5.52308036,-9.65449942e-13 C8.57339338,-9.65449942e-13 11.0461607,2.47282245 11.0461607,5.52320357 C11.0461607,8.57282522 8.57160714,11.0987745 5.52308036,11.0987745 Z M45.9897321,46 L36.4734821,46 L36.4734821,31.0496663 C36.4734821,27.4866403 36.4016071,22.9173419 31.5151339,22.9173419 C26.5567857,22.9173419 25.7969643,26.7884104 25.7969643,30.7929641 L25.7969643,46 L16.2704464,46 L16.2704464,15.2881537 L25.4170536,15.2881537 L25.4170536,19.4775329 L25.5505357,19.4775329 C26.82375,17.0645326 29.9338839,14.5180472 34.5739286,14.5180472 C44.2257143,14.5180472 46,20.8739927 46,29.1295341 L46,46 L45.9897321,46 Z"
+				transform="translate(25 25)"
+			/>
+		</g>
+	</svg>
+</a>
+</li>
+<li>
+	<a href="https://github.com/avocado-planet" target="_blank">
+		<svg
+			id="github"
+			class="custom-icon"
+			version="1.1"
+			xmlns="http://www.w3.org/2000/svg"
+			xmlns:xlink="http://www.w3.org/1999/xlink"
+			viewBox="0 0 100 100"
+			style="height: 30px; width: 30px;"
+		>
+			<circle
+				class="outer-shape"
+				cx="50"
+				cy="50"
+				r="48"
+				style="opacity: 1;"
+			></circle>
+			<path
+				class="inner-shape"
+				style="opacity: 1;"
+				transform="translate(25,25) scale(0.5)"
+				d="M50,1C22.938,1,1,22.938,1,50s21.938,49,49,49s49-21.938,49-49S77.062,1,50,1z M79.099,79.099 c-3.782,3.782-8.184,6.75-13.083,8.823c-1.245,0.526-2.509,0.989-3.79,1.387v-7.344c0-3.86-1.324-6.699-3.972-8.517 c1.659-0.16,3.182-0.383,4.57-0.67c1.388-0.287,2.855-0.702,4.402-1.245c1.547-0.543,2.935-1.189,4.163-1.938 c1.228-0.75,2.409-1.723,3.541-2.919s2.082-2.552,2.847-4.067s1.372-3.334,1.818-5.455c0.446-2.121,0.67-4.458,0.67-7.01 c0-4.945-1.611-9.155-4.833-12.633c1.467-3.828,1.308-7.991-0.478-12.489l-1.197-0.143c-0.829-0.096-2.321,0.255-4.474,1.053 c-2.153,0.798-4.57,2.105-7.249,3.924c-3.797-1.053-7.736-1.579-11.82-1.579c-4.115,0-8.039,0.526-11.772,1.579 c-1.69-1.149-3.294-2.097-4.809-2.847c-1.515-0.75-2.727-1.26-3.637-1.532c-0.909-0.271-1.754-0.439-2.536-0.503 c-0.782-0.064-1.284-0.079-1.507-0.048c-0.223,0.031-0.383,0.064-0.478,0.096c-1.787,4.53-1.946,8.694-0.478,12.489 c-3.222,3.477-4.833,7.688-4.833,12.633c0,2.552,0.223,4.889,0.67,7.01c0.447,2.121,1.053,3.94,1.818,5.455 c0.765,1.515,1.715,2.871,2.847,4.067s2.313,2.169,3.541,2.919c1.228,0.751,2.616,1.396,4.163,1.938 c1.547,0.543,3.014,0.957,4.402,1.245c1.388,0.287,2.911,0.511,4.57,0.67c-2.616,1.787-3.924,4.626-3.924,8.517v7.487 c-1.445-0.43-2.869-0.938-4.268-1.53c-4.899-2.073-9.301-5.041-13.083-8.823c-3.782-3.782-6.75-8.184-8.823-13.083 C9.934,60.948,8.847,55.56,8.847,50s1.087-10.948,3.231-16.016c2.073-4.899,5.041-9.301,8.823-13.083s8.184-6.75,13.083-8.823 C39.052,9.934,44.44,8.847,50,8.847s10.948,1.087,16.016,3.231c4.9,2.073,9.301,5.041,13.083,8.823 c3.782,3.782,6.75,8.184,8.823,13.083c2.143,5.069,3.23,10.457,3.23,16.016s-1.087,10.948-3.231,16.016 C85.848,70.915,82.88,75.317,79.099,79.099L79.099,79.099z"
+			></path>
+		</svg>
+	</a>
+</li>
+</ul>
+		</div>
+	</div>
+</div>
+<!-- end .footer -->
+<!-- Add jQuery and other scripts -->
+<script src="//ajax.googleapis.com/ajax/libs/jquery/1.11.2/jquery.min.js"></script>
+<script>window.jQuery || document.write('<script src=/blog/assets/js/jquery-1.11.2.min.js><\/script>')</script>
+<script src="/blog/assets/js/dropcap.min.js"></script>
+<script src="/blog/assets/js/responsive-nav.min.js"></script>
+<script src="/blog/assets/js/scripts.js"></script>
+</body>
+
+</html>
