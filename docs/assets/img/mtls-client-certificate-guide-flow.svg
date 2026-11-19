@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 580" font-family="Hiragino Sans, Noto Sans JP, Meiryo, sans-serif">
+<defs><marker id="ag" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="#475569" stroke-width="1.5"/></marker></defs>
+<rect width="760" height="580" fill="#ffffff"/>
+<rect x="30" y="16" width="330" height="440" rx="12" fill="none" stroke="#94a3b8" stroke-dasharray="5 5"/>
+<rect x="400" y="16" width="330" height="440" rx="12" fill="none" stroke="#94a3b8" stroke-dasharray="5 5"/>
+<text x="195" y="42" text-anchor="middle" font-size="16" font-weight="bold" fill="#334155">クライアント側(利用者)</text>
+<text x="565" y="42" text-anchor="middle" font-size="16" font-weight="bold" fill="#334155">サーバー側(管理者・CA)</text>
+<g font-size="15" font-weight="bold" text-anchor="middle">
+<rect x="430" y="60" width="270" height="56" rx="8" fill="#dcfce7" stroke="#16a34a"/><text x="565" y="84" fill="#14532d">1. CAを用意</text><text x="565" y="104" font-size="12" font-weight="normal" fill="#166534">社内CAまたは商用CA</text>
+<rect x="430" y="140" width="270" height="56" rx="8" fill="#dcfce7" stroke="#16a34a"/><text x="565" y="164" fill="#14532d">2. クライアント認証を設定</text><text x="565" y="184" font-size="12" font-weight="normal" fill="#166534">信頼するCA証明書を登録</text>
+<rect x="60" y="220" width="270" height="56" rx="8" fill="#dbeafe" stroke="#3b82f6"/><text x="195" y="244" fill="#1e3a8a">3. 秘密鍵とCSRを作成</text><text x="195" y="264" font-size="12" font-weight="normal" fill="#1d4ed8">秘密鍵は端末内に保管</text>
+<rect x="430" y="300" width="270" height="56" rx="8" fill="#dcfce7" stroke="#16a34a"/><text x="565" y="324" fill="#14532d">4. CSRに署名して発行</text><text x="565" y="344" font-size="12" font-weight="normal" fill="#166534">用途は clientAuth</text>
+<rect x="60" y="380" width="270" height="56" rx="8" fill="#dbeafe" stroke="#3b82f6"/><text x="195" y="404" fill="#1e3a8a">5. 証明書を受け取り導入</text><text x="195" y="424" font-size="12" font-weight="normal" fill="#1d4ed8">.p12 をインポート</text>
+<rect x="150" y="490" width="460" height="56" rx="8" fill="#f1f5f9" stroke="#64748b"/><text x="380" y="514" fill="#334155">6. 接続テストと運用</text><text x="380" y="534" font-size="12" font-weight="normal" fill="#475569">更新・失効(CRL/OCSP)</text>
+</g>
+<line x1="565" y1="116" x2="565" y2="138" stroke="#475569" stroke-width="1.5" marker-end="url(#ag)"/>
+<path d="M565 196V208H195V218" fill="none" stroke="#475569" stroke-width="1.5" marker-end="url(#ag)"/>
+<path d="M195 276V288H565V298" fill="none" stroke="#475569" stroke-width="1.5" marker-end="url(#ag)"/>
+<path d="M565 356V368H195V378" fill="none" stroke="#475569" stroke-width="1.5" marker-end="url(#ag)"/>
+<line x1="195" y1="436" x2="195" y2="488" stroke="#475569" stroke-width="1.5" marker-end="url(#ag)"/>
+</svg>

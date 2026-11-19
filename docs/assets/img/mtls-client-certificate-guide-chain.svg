@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 420" font-family="Hiragino Sans, Noto Sans JP, Meiryo, sans-serif">
+<defs><marker id="ag" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="#475569" stroke-width="1.5"/></marker></defs>
+<rect width="760" height="420" fill="#ffffff"/>
+<text x="180" y="30" text-anchor="middle" font-size="16" font-weight="bold" fill="#334155">信頼の鎖</text>
+<text x="570" y="30" text-anchor="middle" font-size="16" font-weight="bold" fill="#334155">サーバーが行う確認</text>
+<rect x="40" y="50" width="280" height="64" rx="8" fill="#f3e8ff" stroke="#9333ea"/>
+<text x="180" y="78" text-anchor="middle" font-size="15" font-weight="bold" fill="#581c87">ルートCA証明書</text>
+<text x="180" y="100" text-anchor="middle" font-size="13" fill="#6b21a8">サーバーの信頼ストアに登録済み</text>
+<rect x="40" y="160" width="280" height="64" rx="8" fill="#dbeafe" stroke="#3b82f6"/>
+<text x="180" y="188" text-anchor="middle" font-size="15" font-weight="bold" fill="#1e3a8a">中間CA証明書</text>
+<text x="180" y="210" text-anchor="middle" font-size="13" fill="#1d4ed8">ルートCAが署名</text>
+<rect x="40" y="270" width="280" height="64" rx="8" fill="#fef3c7" stroke="#d97706"/>
+<text x="180" y="298" text-anchor="middle" font-size="15" font-weight="bold" fill="#78350f">クライアント証明書</text>
+<text x="180" y="320" text-anchor="middle" font-size="13" fill="#92400e">中間CAが署名</text>
+<line x1="180" y1="268" x2="180" y2="228" stroke="#475569" stroke-width="1.5" marker-end="url(#ag)"/>
+<line x1="180" y1="158" x2="180" y2="118" stroke="#475569" stroke-width="1.5" marker-end="url(#ag)"/>
+<g font-size="14" fill="#14532d">
+<rect x="400" y="50" width="340" height="52" rx="8" fill="#dcfce7" stroke="#16a34a"/><text x="420" y="73" font-weight="bold">1. 署名の検証</text><text x="420" y="92" font-size="12" fill="#166534">上位CAの公開鍵で改ざんがないか確認</text>
+<rect x="400" y="116" width="340" height="52" rx="8" fill="#dcfce7" stroke="#16a34a"/><text x="420" y="139" font-weight="bold">2. 鎖が信頼アンカーに到達</text><text x="420" y="158" font-size="12" fill="#166534">ルートCAまでたどれるか</text>
+<rect x="400" y="182" width="340" height="52" rx="8" fill="#dcfce7" stroke="#16a34a"/><text x="420" y="205" font-weight="bold">3. 有効期限</text><text x="420" y="224" font-size="12" fill="#166534">Not Before と Not After の範囲内か</text>
+<rect x="400" y="248" width="340" height="52" rx="8" fill="#dcfce7" stroke="#16a34a"/><text x="420" y="271" font-weight="bold">4. 失効と用途</text><text x="420" y="290" font-size="12" fill="#166534">CRL/OCSP と clientAuth</text>
+<rect x="400" y="314" width="340" height="52" rx="8" fill="#dcfce7" stroke="#16a34a"/><text x="420" y="337" font-weight="bold">5. 秘密鍵の所有確認</text><text x="420" y="356" font-size="12" fill="#166534">CertificateVerify の署名を検証</text>
+</g>
+</svg>
